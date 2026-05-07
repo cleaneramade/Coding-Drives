@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coding Drives</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
+  <link rel="stylesheet" href="/ds/colors_and_type.css" />
+  <link rel="stylesheet" href="/app.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <!-- macOS-style title bar: traffic lights on the left, brand credit on the
+       right. The whole strip is the drag region; only interactive children
+       (the buttons, the credit link) opt out via .nodrag. -->
+  <div class="titlebar drag" role="banner">
+    <div class="traffic-lights nodrag" aria-label="Window controls">
+      <button class="tl tl-close" id="win-close" type="button" aria-label="Close" title="Close">
+        <svg viewBox="0 0 8 8" width="6" height="6"><path d="M2 2l4 4M2 6l4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </button>
+      <button class="tl tl-min" id="win-min" type="button" aria-label="Minimize" title="Minimize">
+        <svg viewBox="0 0 8 8" width="6" height="6"><path d="M1.6 4h4.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </button>
+      <button class="tl tl-max" id="win-max" type="button" aria-label="Maximize" title="Maximize">
+        <svg class="ico-max" viewBox="0 0 8 8" width="6" height="6"><path d="M4 1.6v4.8M1.6 4h4.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <svg class="ico-restore" viewBox="0 0 8 8" width="6" height="6" hidden><path d="M4 1.6v4.8M1.6 4h4.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <a class="titlebar-credit nodrag" href="https://x.com/cleaneramade" target="_blank" rel="noopener noreferrer" title="Open @cleaneramade on X">
+      <span>Made by @cleaneramade</span>
+      <img class="credit-mark" id="credit-mark" src="/api/logo" alt="" />
+    </a>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <img class="brand-mark" id="brand-mark" src="/api/logo" alt="" />
+      <div class="brand-text">
+        <div class="brand-eyebrow">Project Tracker</div>
+        <h1 class="brand-title">Coding Drives</h1>
+      </div>
+    </div>
+
+    <div class="kpi-row" role="group" aria-label="Project counts">
+      <div class="kpi" data-kind="progress">
+        <span class="kpi-num" id="kpi-progress">—</span>
+        <span class="kpi-label">In Progress</span>
+      </div>
+      <div class="kpi" data-kind="on-hold">
+        <span class="kpi-num" id="kpi-on-hold">—</span>
+        <span class="kpi-label">On Hold</span>
+      </div>
+      <div class="kpi" data-kind="done">
+        <span class="kpi-num" id="kpi-done">—</span>
+        <span class="kpi-label">Completed</span>
+      </div>
+      <div class="kpi" data-kind="total">
+        <span class="kpi-num" id="kpi-total">—</span>
+        <span class="kpi-label">Total</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="filters">
+    <div class="search">
+      <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" type="search" placeholder="Search projects…" autocomplete="off" />
+    </div>
+    <div class="chip-row" id="chip-row" role="tablist" aria-label="Filter by status"></div>
+    <div class="cta-row">
+      <button class="btn btn-brand btn-add" id="btn-add" type="button">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Add Project</span>
+      </button>
+      <button class="btn btn-secondary btn-scan" id="btn-scan" type="button" title="Scan configured folders for new projects">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+        <span>Scan</span>
+      </button>
+      <button class="btn btn-secondary btn-settings" id="btn-settings" type="button" title="Settings">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 4.4l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        <span>Settings</span>
+      </button>
+    </div>
+  </section>
+
+  <main class="grid" id="grid"></main>
+
+  <div class="empty" id="empty" hidden>
+    <div class="empty-title">No projects match.</div>
+    <div class="empty-sub">Adjust the search or status filter, or use Add Project to track a folder.</div>
+  </div>
+
+  <div class="toaster" id="toaster" aria-live="polite"></div>
+
+  <!-- ── Add Project modal ─────────────────────────────────────────────── -->
+  <!-- style="display:none" is the third defense layer — base CSS already hides .modal,
+       JS toggles .is-open. Inline style here means even with broken CSS, modal stays hidden until JS opens it. -->
+  <div class="modal" id="modal-add" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-add-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-add-title">Add Project</h2>
+        <button class="icon-btn modal-close" aria-label="Close" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+        </button>
+      </header>
+      <div class="modal-body">
+        <p class="modal-help">Pick a folder or paste its full path. Coding Drives will auto-detect the stack and indicators.</p>
+        <div class="modal-input-row">
+          <input id="add-path" type="text" placeholder="C:\path\to\projects" autocomplete="off" />
+          <button class="btn btn-secondary" id="add-pick" type="button">Browse</button>
+          <button class="btn btn-brand" id="add-submit" type="button">Add</button>
+        </div>
+        <div class="modal-error" id="add-error"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Settings modal ────────────────────────────────────────────────── -->
+  <div class="modal modal-lg" id="modal-settings" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-settings-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-settings-title">Settings</h2>
+        <button class="icon-btn modal-close" aria-label="Close" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+        </button>
+      </header>
+
+      <div class="modal-body settings-body">
+
+        <!-- Backup destination -->
+        <section class="settings-section">
+          <h3 class="settings-title">Backup destination</h3>
+          <p class="settings-help">
+            Default folder where new project backups are stored. Each project keeps a memory of where it was last
+            backed up — re-running Backup updates that same folder rather than creating a duplicate.
+          </p>
+          <div class="modal-input-row">
+            <div class="input-with-paste">
+              <input id="set-backup-path" type="text" placeholder="C:\path\to\backups (browse or paste)" autocomplete="off" readonly />
+              <button class="paste-icon-btn" id="set-backup-paste" type="button" title="Paste from clipboard" aria-label="Paste from clipboard">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
+              </button>
+            </div>
+            <button class="btn btn-secondary" id="set-backup-pick" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+              <span>Browse</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Application logo -->
+        <section class="settings-section">
+          <h3 class="settings-title">App logo</h3>
+          <p class="settings-help">
+            Replaces the brand mark in the header and the running window/taskbar icon — Coding Drives
+            <strong>restarts automatically</strong> so the new icon is applied everywhere it's loaded.
+            Recommended: 256×256 square <strong>PNG</strong> or <strong>ICO</strong> (transparent background);
+            JPG / WEBP also work, and SVG updates the in-app header only.
+          </p>
+          <div class="logo-row">
+            <img class="logo-preview" id="set-logo-preview" src="/api/logo" alt="" />
+            <div class="logo-actions">
+              <button class="btn btn-secondary" id="set-logo-pick" type="button">Replace logo…</button>
+              <button class="btn btn-ghost" id="set-logo-reset" type="button">Reset to default</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Status customization -->
+        <section class="settings-section">
+          <h3 class="settings-title">Statuses</h3>
+          <p class="settings-help">
+            Rename a status or pick a custom hex color. Color applies to status pills, filter chips, and KPIs.
+          </p>
+          <div id="set-statuses" class="status-editor"></div>
+        </section>
+
+        <!-- Scan paths -->
+        <section class="settings-section">
+          <h3 class="settings-title">Scan folders</h3>
+          <p class="settings-help">Each folder listed here is scanned for project subfolders.</p>
+          <div id="set-scan-paths" class="path-list"></div>
+          <div class="modal-input-row">
+            <input id="set-scan-add" type="text" placeholder="C:\path\to\projects" autocomplete="off" />
+            <button class="btn btn-secondary" id="set-scan-pick" type="button">Browse</button>
+            <button class="btn btn-brand" id="set-scan-confirm" type="button">Add</button>
+          </div>
+        </section>
+
+        <!-- Excluded folders -->
+        <section class="settings-section">
+          <h3 class="settings-title">Excluded folder names</h3>
+          <p class="settings-help">
+            Folders matching these names are skipped during scanning. Type a folder name (e.g., <code>Archive</code>)
+            or click <strong>Browse</strong> to pick one — the folder's name will be added to the exclude list.
+          </p>
+          <div id="set-exclude-list" class="chip-edit-row"></div>
+          <div class="modal-input-row">
+            <input id="set-exclude-add" type="text" placeholder="Folder name (e.g., Archive)" autocomplete="off" />
+            <button class="btn btn-secondary" id="set-exclude-pick" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+              <span>Browse</span>
+            </button>
+            <button class="btn btn-brand" id="set-exclude-confirm" type="button">Add</button>
+          </div>
+        </section>
+
+        <div class="modal-error" id="set-error"></div>
+      </div>
+
+      <footer class="modal-foot">
+        <button class="btn btn-ghost" id="set-reset" type="button">Reset all to defaults</button>
+        <div class="grow"></div>
+        <button class="btn btn-ghost modal-close" type="button">Cancel</button>
+        <button class="btn btn-brand" id="set-save" type="button">Save changes</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ── Publish to GitHub modal ───────────────────────────────────────── -->
+  <div class="modal" id="modal-github" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-github-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-github-title">Publish to GitHub</h2>
+        <button class="icon-btn modal-close" aria-label="Close" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+        </button>
+      </header>
+      <div class="modal-body" id="gh-body">
+        <div id="gh-prior" hidden></div>
+
+        <div class="gh-summary" id="gh-summary"></div>
+
+        <div class="gh-progress" id="gh-progress" hidden>
+          <ol class="gh-steps" id="gh-steps"></ol>
+        </div>
+
+        <div class="modal-error" id="gh-error"></div>
+
+        <input id="gh-repo-name" type="hidden" />
+        <input id="gh-dest" type="hidden" />
+      </div>
+      <footer class="modal-foot" id="gh-foot" hidden>
+        <span class="gh-status" id="gh-status"></span>
+        <div class="grow"></div>
+        <button class="btn btn-brand" id="gh-submit" type="button" hidden>Open on GitHub</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ── Card template ─────────────────────────────────────────────────── -->
+  <template id="card-template">
+    <article class="card" data-slug="">
+      <header class="card-head">
+        <div class="card-title-row">
+          <h2 class="card-title"></h2>
+          <div class="card-title-actions">
+            <button class="icon-btn explorer" title="Open in File Explorer" aria-label="Open in File Explorer" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            </button>
+            <button class="icon-btn card-menu" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="card-meta">
+          <span class="stack-badge"></span>
+          <span class="indicators"></span>
+        </div>
+      </header>
+
+      <div class="card-row">
+        <span class="label">Status</span>
+        <div class="status-picker"></div>
+      </div>
+
+      <div class="card-path-row">
+        <div class="card-path" title=""></div>
+        <span class="last-backup" hidden></span>
+      </div>
+
+      <footer class="card-actions">
+        <button class="btn vendor-btn vendor-vscode action-vscode" data-tool="vscode" type="button" title="Open in VS Code">
+          <span class="vendor-mark" aria-hidden="true">
+            <!-- Official VS Code logo silhouette (Microsoft). currentColor keeps it crisp on the blue. -->
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4608 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4609 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0415L12.1872 25.0096C10.589 23.7965 8.35363 23.8959 6.86933 25.2461L1.36303 30.2549C-0.452552 31.9064 -0.454633 34.7627 1.35853 36.417L16.2471 50.0001L1.35853 63.5832C-0.454633 65.2374 -0.452552 68.0938 1.36303 69.7453L6.86933 74.7541C8.35363 76.1043 10.589 76.2037 12.1872 74.9905L29.3551 61.9587L68.769 97.9167C69.3925 98.5406 70.1246 99.0104 70.8511 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z"/>
+            </svg>
+          </span>
+          <span class="vendor-label">VS Code</span>
+        </button>
+        <button class="btn vendor-btn vendor-claude action-claude" data-tool="claude" type="button" title="Open Claude Code in this project">
+          <span class="vendor-mark" aria-hidden="true">
+            <!-- Official Claude Code mark (Anthropic). -->
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+              <path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/>
+            </svg>
+          </span>
+          <span class="vendor-label">Claude Code</span>
+        </button>
+        <button class="btn vendor-btn vendor-codex action-codex" data-tool="codex" type="button" title="Open Codex in this project">
+          <span class="vendor-mark" aria-hidden="true">
+            <!-- Official OpenAI / ChatGPT mark. -->
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true">
+              <path d="M9.20509 8.76511V6.50545C9.20509 6.31513 9.27649 6.17234 9.44293 6.0773L13.9861 3.46088C14.6046 3.10413 15.342 2.93769 16.103 2.93769C18.9573 2.93769 20.7651 5.14983 20.7651 7.50454C20.7651 7.67098 20.7651 7.86129 20.7412 8.05161L16.0316 5.2924C15.7462 5.12596 15.4607 5.12596 15.1753 5.2924L9.20509 8.76511ZM19.8135 17.5659V12.1664C19.8135 11.8333 19.6708 11.5955 19.3854 11.429L13.4152 7.95633L15.3656 6.83833C15.5321 6.74328 15.6749 6.74328 15.8413 6.83833L20.3845 9.45474C21.6928 10.216 22.5728 11.8333 22.5728 13.4031C22.5728 15.2108 21.5025 16.8758 19.8135 17.5657V17.5659ZM7.80173 12.8088L5.8513 11.6671C5.68486 11.5721 5.61346 11.4293 5.61346 11.239V6.00613C5.61346 3.46111 7.56389 1.53433 10.2042 1.53433C11.2033 1.53433 12.1307 1.86743 12.9159 2.46202L8.2301 5.17371C7.94475 5.34015 7.80195 5.57798 7.80195 5.91109V12.809L7.80173 12.8088ZM12 15.2349L9.20509 13.6651V10.3351L12 8.76534L14.7947 10.3351V13.6651L12 15.2349ZM13.7958 22.4659C12.7967 22.4659 11.8693 22.1328 11.0841 21.5382L15.7699 18.8265C16.0553 18.6601 16.198 18.4222 16.198 18.0891V11.1912L18.1723 12.3329C18.3388 12.4279 18.4102 12.5707 18.4102 12.761V17.9939C18.4102 20.5389 16.4359 22.4657 13.7958 22.4657V22.4659ZM8.15848 17.1617L3.61528 14.5452C2.30696 13.784 1.42701 12.1667 1.42701 10.5969C1.42701 8.76534 2.52115 7.12414 4.20987 6.43428V11.8574C4.20987 12.1905 4.35266 12.4284 4.63802 12.5948L10.5846 16.0436L8.63415 17.1617C8.46771 17.2567 8.32492 17.2567 8.15848 17.1617ZM7.897 21.0625C5.20919 21.0625 3.23488 19.0407 3.23488 16.5432C3.23488 16.3529 3.25875 16.1626 3.2824 15.9723L7.96817 18.6839C8.25352 18.8504 8.53911 18.8504 8.82446 18.6839L14.7947 15.2351V17.4948C14.7947 17.6851 14.7233 17.8279 14.5568 17.9229L10.0136 20.5393C9.39518 20.8961 8.6578 21.0625 7.89677 21.0625H7.897ZM13.7958 23.8929C16.6739 23.8929 19.0762 21.8474 19.6235 19.1357C22.2874 18.4459 24 15.9484 24 13.4034C24 11.7383 23.2865 10.121 22.002 8.95542C22.121 8.45588 22.1924 7.95633 22.1924 7.45702C22.1924 4.0557 19.4331 1.51045 16.2458 1.51045C15.6037 1.51045 14.9852 1.60549 14.3668 1.81968C13.2963 0.773071 11.8215 0.107086 10.2042 0.107086C7.32606 0.107086 4.92383 2.15256 4.37653 4.86425C1.7126 5.55411 0 8.05161 0 10.5966C0 12.2617 0.713506 13.879 1.99795 15.0446C1.87904 15.5441 1.80764 16.0436 1.80764 16.543C1.80764 19.9443 4.56685 22.4895 7.75421 22.4895C8.39632 22.4895 9.01478 22.3945 9.63324 22.1803C10.7035 23.2269 12.1783 23.8929 13.7958 23.8929Z"/>
+            </svg>
+          </span>
+          <span class="vendor-label">Codex</span>
+        </button>
+      </footer>
+
+    </article>
+  </template>
+
+  <!-- ── Card menu (popover) ───────────────────────────────────────────── -->
+  <div class="popover" id="card-popover" style="display:none" role="menu">
+    <button class="popover-item" data-action="backup" role="menuitem" type="button">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>
+      <span>Backup now</span>
+    </button>
+    <button class="popover-item" data-action="publish-github" role="menuitem" type="button">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.11.79-.25.79-.56v-2.04c-3.2.7-3.88-1.37-3.88-1.37-.52-1.34-1.27-1.7-1.27-1.7-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.24 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.16 1.18a10.94 10.94 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+      <span>Publish to GitHub</span>
+    </button>
+    <button class="popover-item" data-action="archive" role="menuitem" type="button">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M9 11h6"/></svg>
+      <span>Archive (hide)</span>
+    </button>
+    <button class="popover-item" data-action="unarchive" role="menuitem" type="button">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M9 14l3-3 3 3M12 11v7"/></svg>
+      <span>Unarchive</span>
+    </button>
+    <button class="popover-item" data-action="copy-path" role="menuitem" type="button">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+      <span>Copy path</span>
+    </button>
+    <button class="popover-item popover-danger" data-action="untrack" role="menuitem" type="button">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13M9 7V4h6v3"/></svg>
+      <span>Untrack (manual only)</span>
+    </button>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

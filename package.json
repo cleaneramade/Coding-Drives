@@ -1,0 +1,67 @@
+{
+  "name": "coding-drives",
+  "productName": "Coding Drives",
+  "version": "1.2.8",
+  "private": true,
+  "type": "module",
+  "description": "Project tracker for the Coding Drives folder.",
+  "main": "electron.cjs",
+  "scripts": {
+    "server": "node server.js",
+    "dev": "electron .",
+    "icon": "node scripts/build-icon.mjs",
+    "prebuild": "node scripts/build-icon.mjs",
+    "build": "electron-builder --win nsis --x64",
+    "build:portable": "electron-builder --win portable --x64",
+    "build:dir": "electron-builder --dir --win --x64"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "electron": "^41.5.0",
+    "electron-builder": "^26.8.1",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5"
+  },
+  "build": {
+    "appId": "com.cleaneramade.codingdrives",
+    "productName": "Coding Drives",
+    "asar": false,
+    "files": [
+      "electron.cjs",
+      "preload.cjs",
+      "server.js",
+      "config.json",
+      "public/**/*",
+      "assets/icon.ico",
+      "assets/logo.svg",
+      "package.json",
+      "!demo/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "Coding Drives Setup ${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Coding Drives",
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "Coding Drives Portable.exe"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "scanPaths": [
+    "C:\\Users\\Weedw\\Documents\\♾️ Coding Projects - Local"
+  ],
+  "excludeFolders": [
+    "Coding Drives",
+    "Design System",
+    "Obsidian Vault"
+  ],
+  "backupPath": "C:\\Users\\Weedw\\Documents\\Coding Drives Backups",
+  "designSystemCss": "C:\\Users\\Weedw\\Documents\\♾️ Coding Projects - Local\\Design System\\colors_and_type.css",
+  "extraProjectPaths": [],
+  "tools": {
+    "vscode":          "C:\\Users\\Weedw\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd",
+    "claude":          "claude",
+    "codex":           "codex",
+    "windowsTerminal": "C:\\Users\\Weedw\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe"
+  },
+  "statuses": [
+    {
+      "id": "in-progress",
+      "label": "In Progress",
+      "color": "warning"
+    },
+    {
+      "id": "on-hold",
+      "label": "On Hold",
+      "color": "danger"
+    },
+    {
+      "id": "done",
+      "label": "Done",
+      "color": "success"
+    },
+    {
+      "id": "archived",
+      "label": "Archived",
+      "color": "archived"
+    }
+  ],
+  "port": 5179
+}
