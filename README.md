@@ -18,27 +18,50 @@ Everything runs locally — no accounts, no telemetry, no cloud sync.
 
 ## Installation
 
+Two ways to get started:
+
+### Option 1 — Download the installer (no setup)
+
+Grab the latest signed Windows installer from the [Releases page](https://github.com/cleaneramade/Coding-Drives/releases) and run it. The app installs per-user (no admin prompt) and creates Desktop + Start Menu shortcuts.
+
+### Option 2 — Run from source
+
+Requirements: [Node.js 20+](https://nodejs.org/) and Windows.
+
 ```bash
 git clone https://github.com/cleaneramade/Coding-Drives.git
 cd Coding-Drives
 npm install
-```
-
-## Usage
-
-Launch the desktop app from source:
-
-```bash
 npm run dev
 ```
 
-Or build a Windows installer:
+To build your own installer:
 
 ```bash
 npm run build
 ```
 
 The installer lands in `dist/Coding Drives Setup 1.2.8.exe`.
+
+## First launch
+
+When the app opens for the first time the project grid will be empty. Click the **Settings** button in the top right and:
+
+1. **Scan folders** — add one or more root folders (e.g. `C:\Users\you\Documents\Code`). Every subfolder becomes a project card.
+2. **Backup destination** — pick where backups should land. Defaults to `Documents\Coding Drives Backups` if left blank.
+3. *(Optional)* **App logo** — replace the brand mark with your own.
+
+That's it. The app rescans whenever the window regains focus, so dropping a new folder into one of your scan roots immediately surfaces it as a card.
+
+## Publishing to GitHub
+
+The **⋯ → Publish to GitHub** action on any project card requires the [GitHub CLI](https://cli.github.com/) installed and authenticated (`gh auth login`). Once that's set up, clicking Publish will:
+
+1. Mirror the project to a clean public copy at `{parent}\{name}-public`, excluding `.env`, secrets, `node_modules`, and build artifacts.
+2. Generate `README.md`, `LICENSE` (MIT), `.gitignore`, and `.github/` issue + PR templates.
+3. Run `git init`, `git commit`, and `gh repo create --public --source=. --push`.
+4. Set the repo's description, homepage, and topics from `package.json`.
+5. Create a `v{version}` release with auto-generated notes.
 
 ## Scripts
 

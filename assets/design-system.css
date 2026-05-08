@@ -1,0 +1,270 @@
+/* ==========================================================================
+   Cleanera Made — Colors & Type
+   Dark-first, frosted-glass system. Brand color: #6A4DFF (Cleanera Violet).
+   Use these vars across all surfaces. Light mode is supported via
+   [data-theme="light"]; default is dark.
+   ========================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Geist+Mono:wght@400;500&display=swap");
+
+:root {
+  /* ── Brand ────────────────────────────────────────────────────────────── */
+  --brand-300: #c4b5ff;
+  --brand-400: #a08aff;
+  --brand-500: #6a4dff;   /* primary */
+  --brand-600: #5b3eef;
+  --brand-700: #5538e0;
+  --brand-800: #4a30d4;
+  --brand-900: #3a25b8;
+  --brand-glow: 0 10px 30px -10px rgba(106, 77, 255, 0.45);
+
+  /* ── Foreground / Background (DARK DEFAULT) ───────────────────────────── */
+  color-scheme: dark;
+  --bg:       #131316;       /* page */
+  --bg-2:     #0b0b0e;       /* deeper recess */
+  --fg-1:     #fafafa;       /* primary text */
+  --fg-2:     #d4d4d8;       /* secondary text */
+  --fg-3:     #a1a1aa;       /* muted */
+  --fg-4:     #71717a;       /* even more muted / placeholder */
+
+  /* ── Surface (frosted glass) ──────────────────────────────────────────── */
+  --surface:        linear-gradient(135deg, rgba(32,32,40,0.97) 0%, rgba(28,28,36,0.95) 60%, rgba(24,24,32,0.93) 100%);
+  --surface-solid:  #1e1e24;
+  --surface-2:      rgba(255,255,255,0.06);
+  --surface-3:      rgba(255,255,255,0.10);
+  --sidebar:        rgba(24,24,30,0.80);
+
+  /* ── Border / Stroke ──────────────────────────────────────────────────── */
+  --border:        rgba(255,255,255,0.08);
+  --border-soft:   rgba(255,255,255,0.04);
+  --glass-stroke:  rgba(255,255,255,0.04);
+  --ring:          rgba(255,255,255,0.15);
+  --ring-brand:    rgba(106, 77, 255, 0.50);
+
+  /* ── Glass ────────────────────────────────────────────────────────────── */
+  --glass-blur:      saturate(180%) blur(22px);
+  --glass-blur-strong: saturate(200%) blur(28px);
+  --glass-highlight: rgba(255,255,255,0.05);
+
+  /* ── Semantic ─────────────────────────────────────────────────────────── */
+  --success: #34d399;
+  --success-soft: rgba(52,211,153,0.18);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251,191,36,0.18);
+  --danger:  #f87171;
+  --danger-soft: rgba(248,113,113,0.18);
+  --info:    #60a5fa;
+  --info-soft: rgba(96,165,250,0.18);
+  --accent:  #a78bfa;          /* lavender accent — supports brand */
+  --accent-soft: rgba(167,139,250,0.18);
+
+  /* ── Icon tile tints (background, foreground) — 8 hues, ~45° apart ────── */
+  --tile-violet-bg: rgba(106,77,255,0.18);   --tile-violet-fg: #c4b5ff;   /* brand violet  */
+  --tile-blue-bg:   rgba(59,130,246,0.18);   --tile-blue-fg:   #93c5fd;   /* royal blue    */
+  --tile-green-bg:  rgba(34,197,94,0.20);    --tile-green-fg:  #86efac;   /* grass green   */
+  --tile-yellow-bg: rgba(234,179,8,0.20);    --tile-yellow-fg: #fde047;   /* yellow        */
+  --tile-orange-bg: rgba(249,115,22,0.20);   --tile-orange-fg: #fdba74;   /* orange        */
+  --tile-red-bg:    rgba(220,38,38,0.22);    --tile-red-fg:    #fca5a5;   /* true red      */
+  --tile-magenta-bg:rgba(217,70,239,0.20);   --tile-magenta-fg:#f0abfc;   /* magenta       */
+  --tile-slate-bg:  rgba(255,255,255,0.10);  --tile-slate-fg:  #fafafa;   /* slate / mono  */
+
+  /* ── Radii ────────────────────────────────────────────────────────────── */
+  --radius:     1rem;        /* 16px — base */
+  --radius-xs:  0.375rem;    /*  6px */
+  --radius-sm:  0.625rem;    /* 10px */
+  --radius-md:  0.75rem;     /* 12px */
+  --radius-lg:  1rem;        /* 16px */
+  --radius-xl:  1.25rem;     /* 20px */
+  --radius-2xl: 1.5rem;      /* 24px */
+  --radius-pill: 9999px;
+
+  /* ── Spacing scale (4px base) ─────────────────────────────────────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Shadow / Elevation (dark) — subtle, not chunky ──────────────────── */
+  --shadow-xs: 0 1px 1px rgba(0,0,0,0.20);
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.25);
+  --shadow:    0 4px 14px -6px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.25);
+  --shadow-lg: 0 12px 28px -12px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.30);
+  --shadow-xl: 0 20px 40px -16px rgba(0,0,0,0.65), 0 4px 10px rgba(0,0,0,0.35);
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,0.05);
+  --shadow-brand: 0 6px 18px -8px rgba(106,77,255,0.30);
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  --font-sans:    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bricolage Grotesque", "Inter", system-ui, sans-serif;  /* expressive display face — opsz 12..96 */
+  --font-mono:    "Geist Mono", ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  --tracking-tight:  -0.02em;
+  --tracking-snug:   -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide:    0.08em;       /* uppercase section labels */
+
+  --leading-tight:   1.15;
+  --leading-snug:    1.30;
+  --leading-normal:  1.50;
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --ease-out:   cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast:   120ms;
+  --dur:        180ms;
+  --dur-slow:   260ms;
+}
+
+/* ── Light mode override ─────────────────────────────────────────────────── */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg:       #f4f5f9;
+  --bg-2:     #e6ecf5;
+  --fg-1:     #0f172a;
+  --fg-2:     #334155;
+  --fg-3:     #64748b;
+  --fg-4:     #94a3b8;
+
+  --surface:        linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(243,245,251,0.78) 100%);
+  --surface-solid:  #ffffff;
+  --surface-2:      rgba(15,23,42,0.04);
+  --surface-3:      rgba(15,23,42,0.06);
+  --sidebar:        rgba(255,255,255,0.85);
+
+  --border:        rgba(15,23,42,0.08);
+  --border-soft:   rgba(15,23,42,0.04);
+  --glass-stroke:  rgba(148,163,184,0.30);
+  --ring:          rgba(15,23,42,0.15);
+
+  --shadow-sm: 0 2px 8px -3px rgba(15,23,42,0.10);
+  --shadow:    0 8px 24px -10px rgba(15,23,42,0.18), 0 2px 6px -2px rgba(15,23,42,0.06);
+  --shadow-lg: 0 18px 38px -16px rgba(15,23,42,0.22), 0 4px 10px -2px rgba(15,23,42,0.08);
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,0.85);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Type ramp — semantic helpers. Pair Inter (display + body) with Geist Mono
+   (code + numeric tickers).
+   ────────────────────────────────────────────────────────────────────────── */
+
+.cm-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 56px;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  font-variation-settings: "opsz" 96;
+  color: var(--fg-1);
+}
+.cm-h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 36px;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-variation-settings: "opsz" 60;
+  color: var(--fg-1);
+}
+.cm-h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  font-variation-settings: "opsz" 28;
+  color: var(--fg-1);
+}
+.cm-h3 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.3;
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg-1);
+}
+.cm-h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--fg-1);
+}
+.cm-body {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: 14px;
+  line-height: var(--leading-normal);
+  color: var(--fg-2);
+}
+.cm-body-sm {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+.cm-caption {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-3);
+}
+.cm-section-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cm-mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--fg-2);
+}
+.cm-numeric {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-1);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Surface helpers — drop-in classes that match the in-product feel.
+   ────────────────────────────────────────────────────────────────────────── */
+.cm-glass-card {
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.30), var(--shadow-inset);
+  border: 0;
+}
+.cm-glass-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.40), var(--shadow-inset);
+}
+.cm-glass-surface {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 1px var(--glass-stroke);
+  background: var(--sidebar);
+}
+.cm-floating-pill {
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 8px 32px -8px rgba(0,0,0,0.70), var(--shadow-inset);
+}

@@ -1,20 +1,19 @@
 {
-  "scanPaths": [
-    "C:\\Users\\Weedw\\Documents\\♾️ Coding Projects - Local"
-  ],
+  "scanPaths": [],
   "excludeFolders": [
-    "Coding Drives",
-    "Design System",
-    "Obsidian Vault"
+    ".git",
+    ".vscode",
+    ".idea",
+    "node_modules"
   ],
-  "backupPath": "C:\\Users\\Weedw\\Documents\\Coding Drives Backups",
-  "designSystemCss": "C:\\Users\\Weedw\\Documents\\♾️ Coding Projects - Local\\Design System\\colors_and_type.css",
+  "backupPath": "",
+  "designSystemCss": "",
   "extraProjectPaths": [],
   "tools": {
-    "vscode":          "C:\\Users\\Weedw\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd",
-    "claude":          "claude",
-    "codex":           "codex",
-    "windowsTerminal": "C:\\Users\\Weedw\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe"
+    "vscode": "code.cmd",
+    "claude": "claude",
+    "codex": "codex",
+    "windowsTerminal": "wt.exe"
   },
   "statuses": [
     {

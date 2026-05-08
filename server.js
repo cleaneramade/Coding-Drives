@@ -130,12 +130,28 @@ async function writeDB(db) {
 }
 
 // ─── Design system CSS sync ─────────────────────────────────────────────────
+// Order of preference for the colors/type CSS that powers the app's theme:
+//   1. cfg.designSystemCss — an external path the user may have set in config
+//   2. assets/design-system.css — the bundled default that ships with the repo
+//   3. a one-line stub so the app at least boots
+const BUNDLED_DS_CSS = path.join(ASSETS_DIR, "design-system.css");
 async function syncDesignSystem(cfg) {
   await fsp.mkdir(DS_OUT_DIR, { recursive: true });
+  if (cfg.designSystemCss) {
+    try {
+      const css = await fsp.readFile(cfg.designSystemCss, "utf8");
+      await fsp.writeFile(DS_OUT_FILE, css);
+      console.log("[ds] synced colors_and_type.css from", cfg.designSystemCss);
+      return;
+    } catch (err) {
+      console.warn("[ds] external design system CSS not found at", cfg.designSystemCss);
+    }
+  }
   try {
-    const css = await fsp.readFile(cfg.designSystemCss, "utf8");
+    const css = await fsp.readFile(BUNDLED_DS_CSS, "utf8");
     await fsp.writeFile(DS_OUT_FILE, css);
-    console.log("[ds] synced colors_and_type.css from design system");
+    console.log("[ds] using bundled design-system.css");
+    return;
   } catch (err) {
     if (!fs.existsSync(DS_OUT_FILE)) {
       await fsp.writeFile(DS_OUT_FILE, "/* fallback — design system not found */\n");
