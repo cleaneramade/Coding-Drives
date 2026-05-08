@@ -2,9 +2,9 @@
 
 # Coding Drives
 
-Project tracker for the Coding Drives folder.
+The fastest way to track every coding project on your PC — a native Windows desktop app that turns your projects folder into a clickable dashboard.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-6a4dff.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-1.2.8-1f1f23.svg) [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-6a4dff.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-1.2.8-1f1f23.svg) [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6.svg)](#) [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
 
 </div>
 
@@ -12,7 +12,9 @@ Project tracker for the Coding Drives folder.
 
 ## Overview
 
-Coding Drives is a local-first project tracker built as a native Windows desktop app. It scans the folders you point it at, auto-detects the stack (Next.js, React, Node, Python, Rust, Flutter, Go, Static…), and gives every project a card with status, notes, one-click open in VS Code / Claude / Codex, robocopy-powered backups, and a Publish-to-GitHub flow that creates a clean public copy and pushes it to a polished GitHub repo.
+Coding Drives is a local-first project dashboard for developers who live in their `~/Documents` folder. Point it at any number of root folders, and every subfolder becomes a card — auto-detected stack (Next.js, React, Node, Python, Rust, Flutter, Go, Static), status workflow, one-click open in **VS Code**, **Claude Code**, or **Codex**, safe robocopy backups, and a one-click **Publish to GitHub** flow that mirrors the project to a clean public copy, generates README + LICENSE + issue templates, and pushes it to a polished public repo with a release.
+
+Built specifically for the AI-era development workflow where projects multiply faster than you can name them.
 
 ## Installation
 

@@ -2,5 +2,8 @@ node_modules/
 data/
 public/ds/
 dist/
+demo/
+.claude/
 .DS_Store
+Thumbs.db
 *.log
