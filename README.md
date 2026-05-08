@@ -2,7 +2,7 @@
 
 # Coding Drives
 
-The fastest way to track every coding project on your PC — a native Windows desktop app that turns your projects folder into a clickable dashboard.
+A native Windows dashboard for your local coding projects — open them in VS Code, Claude Code, or Codex, back them up safely, and publish to GitHub from one place.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-6a4dff.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-1.2.8-1f1f23.svg) [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6.svg)](#) [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
 
@@ -12,9 +12,9 @@ The fastest way to track every coding project on your PC — a native Windows de
 
 ## Overview
 
-Coding Drives is a local-first project dashboard for developers who live in their `~/Documents` folder. Point it at any number of root folders, and every subfolder becomes a card — auto-detected stack (Next.js, React, Node, Python, Rust, Flutter, Go, Static), status workflow, one-click open in **VS Code**, **Claude Code**, or **Codex**, safe robocopy backups, and a one-click **Publish to GitHub** flow that mirrors the project to a clean public copy, generates README + LICENSE + issue templates, and pushes it to a polished public repo with a release.
+Point Coding Drives at any number of root folders and every subfolder becomes a card. Each card detects the project's stack (Next.js, React, Node, Python, Rust, Flutter, Go, Static), tracks its status, and gives you one-click access to **VS Code**, **Claude Code**, or **Codex**. The **Backup** action runs a safe robocopy mirror to a folder of your choice. The **Publish to GitHub** action mirrors the project to a clean public copy (excluding secrets and build artifacts), generates a README, LICENSE, and issue templates, and pushes it to GitHub as a public repo with a release.
 
-Built specifically for the AI-era development workflow where projects multiply faster than you can name them.
+Everything runs locally — no accounts, no telemetry, no cloud sync.
 
 ## Installation
 
