@@ -2,7 +2,7 @@
 
 # Coding Drives
 
-A native Windows dashboard for your local coding projects — open them in VS Code, Claude Code, or Codex, back them up safely, and publish to GitHub from one place.
+See every coding project on your PC in one dashboard. Open them in VS Code, Claude Code, or Codex, back them up safely, and publish to GitHub — all from one app.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-6a4dff.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-1.2.8-1f1f23.svg) [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6.svg)](#) [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
 
@@ -10,23 +10,32 @@ A native Windows dashboard for your local coding projects — open them in VS Co
 
 ---
 
-## Overview
+## What it does
 
-Point Coding Drives at any number of root folders and every subfolder becomes a card. Each card detects the project's stack (Next.js, React, Node, Python, Rust, Flutter, Go, Static), tracks its status, and gives you one-click access to **VS Code**, **Claude Code**, or **Codex**. The **Backup** action runs a safe robocopy mirror to a folder of your choice. The **Publish to GitHub** action mirrors the project to a clean public copy (excluding secrets and build artifacts), generates a README, LICENSE, and issue templates, and pushes it to GitHub as a public repo with a release.
+Point Coding Drives at the folder where you keep your projects. Every subfolder becomes a card.
 
-Everything runs locally — no accounts, no telemetry, no cloud sync.
+From any card you can:
 
-## Installation
+- **Open** the project in VS Code, Claude Code, or Codex with one click
+- **Back it up** safely to a folder you choose
+- **Publish it to GitHub** as a polished public repo — README, LICENSE, topics, and a v1 release are all created for you
 
-Two ways to get started:
+Everything runs on your computer. No accounts. No telemetry. No cloud sync.
 
-### Option 1 — Download the installer (no setup)
+## Features
 
-Grab the latest signed Windows installer from the [Releases page](https://github.com/cleaneramade/Coding-Drives/releases) and run it. The app installs per-user (no admin prompt) and creates Desktop + Start Menu shortcuts.
+- Auto-detects each project's stack (Next.js, React, Node, Python, Rust, Flutter, Go)
+- Status workflow — In Progress, On Hold, Done, Archived
+- Notes, status colors, and a per-project menu (Backup, Publish, Archive, Copy path)
+- Safe folder backups using Windows' built-in copy engine
+- One-click GitHub publishing with secrets and `node_modules` automatically excluded
+- Custom branding — drop in your own logo and the window/taskbar icon updates instantly
 
-### Option 2 — Run from source
+## Install
 
-Requirements: [Node.js 20+](https://nodejs.org/) and Windows.
+**The fast way** — grab the latest installer from the [Releases page](https://github.com/cleaneramade/Coding-Drives/releases) and run it. Per-user install, no admin prompt.
+
+**From source** — requires [Node.js 20+](https://nodejs.org/) and Windows:
 
 ```bash
 git clone https://github.com/cleaneramade/Coding-Drives.git
@@ -35,70 +44,52 @@ npm install
 npm run dev
 ```
 
-To build your own installer:
+## First launch
+
+The grid will be empty. Open **Settings** (top-right) and:
+
+1. **Scan folders** — add the root folder where your projects live (e.g. `C:\Users\you\Documents\Code`). Every subfolder becomes a card.
+2. **Backup destination** *(optional)* — pick where backups should go. Defaults to `Documents\Coding Drives Backups` if you leave it blank.
+3. **App logo** *(optional)* — upload your own logo to replace the brand mark.
+
+That's it. Coding Drives rescans whenever the window regains focus, so dropping a new folder into your scan root immediately surfaces it as a card.
+
+## Publishing to GitHub
+
+Click the **⋯** menu on any project card → **Publish to GitHub**.
+
+You only need to do this setup once: install the [GitHub CLI](https://cli.github.com/) and run `gh auth login` in a terminal. After that, clicking Publish handles everything — it builds a clean public copy of your project, creates the GitHub repo, generates a README, LICENSE, and issue templates, sets the description and topics, and tags a v1 release.
+
+The original folder is never modified. The public copy lands in a sibling folder so you always have a clear separation between your private working copy and what's shipped.
+
+---
+
+## For developers
+
+### Build your own installer
 
 ```bash
 npm run build
 ```
 
-The installer lands in `dist/Coding Drives Setup 1.2.8.exe`.
+The installer ends up at `dist/Coding Drives Setup 1.2.8.exe`.
 
-## First launch
+### Other scripts
 
-When the app opens for the first time the project grid will be empty. Click the **Settings** button in the top right and:
+- `npm run server` — run only the local server (no app window)
+- `npm run icon` — regenerate the app icon from `assets/logo.svg`
+- `npm run build:portable` — single-file portable `.exe`
+- `npm run build:dir` — unpacked app folder for fast iteration
 
-1. **Scan folders** — add one or more root folders (e.g. `C:\Users\you\Documents\Code`). Every subfolder becomes a project card.
-2. **Backup destination** — pick where backups should land. Defaults to `Documents\Coding Drives Backups` if left blank.
-3. *(Optional)* **App logo** — replace the brand mark with your own.
+### How it works
 
-That's it. The app rescans whenever the window regains focus, so dropping a new folder into one of your scan roots immediately surfaces it as a card.
+Coding Drives is a small Electron app. The window loads a local web UI served by an in-process Express server. Project state (status, notes, backup history) is stored as JSON under your `%APPDATA%`. The Open actions launch the right CLI in the right folder; backups use Windows' `robocopy`; publishing uses the GitHub CLI.
 
-## Publishing to GitHub
-
-The **⋯ → Publish to GitHub** action on any project card requires the [GitHub CLI](https://cli.github.com/) installed and authenticated (`gh auth login`). Once that's set up, clicking Publish will:
-
-1. Mirror the project to a clean public copy at `{parent}\{name}-public`, excluding `.env`, secrets, `node_modules`, and build artifacts.
-2. Generate `README.md`, `LICENSE` (MIT), `.gitignore`, and `.github/` issue + PR templates.
-3. Run `git init`, `git commit`, and `gh repo create --public --source=. --push`.
-4. Set the repo's description, homepage, and topics from `package.json`.
-5. Create a `v{version}` release with auto-generated notes.
-
-## Scripts
-
-- `npm run server` — Start the local Express server (no Electron window)
-- `npm run dev` — Run in development mode (Electron + server)
-- `npm run icon` — Regenerate `assets/icon.ico` from `assets/logo.svg`
-- `npm run build` — Build the NSIS Windows installer
-- `npm run build:portable` — Build a single-file portable `.exe`
-- `npm run build:dir` — Produce the unpacked app folder for fast iteration
-
-## Features
-
-- **Folder scanning** — point at any number of root folders, auto-discover projects
-- **Stack auto-detection** — Next.js, React, Node API, Vite, Flutter, Python, Rust, Go, Static
-- **Status board** — In Progress / On Hold / Done / Archived with custom labels and colors
-- **One-click tools** — Open in VS Code, launch Claude Code, launch Codex in Windows Terminal
-- **Robocopy backups** — `/MIR` to a configurable destination, with safety markers
-- **Publish to GitHub** — clean public copy + `gh repo create --public --push` + repo polish + release
-- **Custom branding** — replace the app logo at runtime; auto-restart applies it everywhere
-- **Frameless macOS-style window** — traffic-light controls, drag region, ambient background
-
-## Tech Stack
-
-- [Electron](https://www.electronjs.org/) — desktop shell
-- [Express](https://expressjs.com/) — in-process API for project state
-- Vanilla HTML / CSS / JS frontend (no framework, no build step for the renderer)
-- [Sharp](https://sharp.pixelplumbing.com/) + [png-to-ico](https://www.npmjs.com/package/png-to-ico) — icon generation
-- [electron-builder](https://www.electron.build/) — NSIS Windows installer
-
-## Contributing
-
-Contributions, issues, and feature requests are welcome.
-Open an [issue](https://github.com/cleaneramade/Coding-Drives/issues) or submit a pull request.
+There's no build step for the renderer — `public/index.html`, `public/app.css`, and `public/app.js` are vanilla and load directly.
 
 ## License
 
-MIT © cleaneramade — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
 
 ---
 

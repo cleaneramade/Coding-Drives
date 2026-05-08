@@ -4,7 +4,31 @@
   "version": "1.2.8",
   "private": true,
   "type": "module",
-  "description": "Project tracker for the Coding Drives folder.",
+  "description": "See every coding project on your PC in one dashboard. Open them in VS Code, Claude Code, or Codex, back them up safely, and publish to GitHub.",
+  "homepage": "https://github.com/cleaneramade/Coding-Drives",
+  "author": {
+    "name": "cleaneramade",
+    "url": "https://x.com/cleaneramade"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cleaneramade/Coding-Drives.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cleaneramade/Coding-Drives/issues"
+  },
+  "keywords": [
+    "electron",
+    "desktop-app",
+    "project-tracker",
+    "windows",
+    "vscode",
+    "claude-code",
+    "codex",
+    "developer-tools",
+    "local-first"
+  ],
   "main": "electron.cjs",
   "scripts": {
     "server": "node server.js",
@@ -36,8 +60,8 @@
       "public/**/*",
       "assets/icon.ico",
       "assets/logo.svg",
-      "package.json",
-      "!demo/**/*"
+      "assets/design-system.css",
+      "package.json"
     ],
     "directories": {
       "output": "dist"
