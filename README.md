@@ -39,6 +39,14 @@ Everything runs on your computer. No accounts. No telemetry. No cloud sync.
 - **Publish to GitHub** — do it yourself or let Claude/Codex run it — with secrets and `node_modules` excluded, plus tagged releases
 - **Custom branding** — drop in your own logo and the window/taskbar icon updates instantly
 
+<div align="center">
+
+<img src="docs/dashboard-minimal.png" alt="Coding Drives with badges toggled off — a minimal card view" width="860">
+
+<sub>Prefer it clean? Toggle the language and tech badges off in Settings.</sub>
+
+</div>
+
 ## Install
 
 **The fast way** — grab the latest installer from the [Releases page](https://github.com/cleaneramade/Coding-Drives/releases) and run it. Per-user install, no admin prompt.
