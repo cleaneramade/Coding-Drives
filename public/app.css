@@ -4,7 +4,7 @@
 html, body { margin: 0; padding: 0; }
 
 /* The HTML `hidden` attribute must always win over later display rules.
-   Without this, .modal/.popover/.source-pill (which set display:flex/inline-flex)
+   Without this, elements like .modal (which set display:flex/inline-flex)
    would override [hidden] and show on load. */
 [hidden] { display: none !important; }
 
@@ -52,7 +52,6 @@ body {
   padding: 0 22px 0 24px;
   user-select: none;
 }
-.traffic-lights { gap: 9px; }
 .traffic-lights {
   display: inline-flex;
   align-items: center;
@@ -67,10 +66,13 @@ body {
   display: inline-flex;
   align-items: center; justify-content: center;
   color: transparent;            /* SVG glyphs only show on hover */
-  transition: filter 120ms var(--ease-out), color 120ms var(--ease-out);
+  transition: color 120ms var(--ease-out);
 }
-.tl:hover { color: rgba(0,0,0,0.55); filter: brightness(1.06); }
-.tl:active { filter: brightness(0.85); }
+/* Hover/active reveal the glyph + slightly darken the dot — no brightness()
+   filter (was 1.06, read as too loud and inconsistent with the rest of the
+   app's calmer hover language). */
+.tl:hover  { color: rgba(0,0,0,0.55); }
+.tl:active { color: rgba(0,0,0,0.75); }
 .tl-close { background: #ed6a5f; }
 .tl-min   { background: #f6be50; }
 .tl-max   { background: #61c555; }
@@ -98,19 +100,20 @@ body {
               border-color var(--dur) var(--ease-out),
               transform var(--dur-fast) var(--ease-out);
 }
+/* Calm hover — surface + border shift only. The translateY(-1px) lift used
+   to be here but was an outlier; the credit pill is decorative chrome, not
+   a CTA, so it shouldn't move on hover. */
 .titlebar-credit:hover {
   background: var(--surface-3);
   color: var(--fg-1);
   border-color: var(--ring);
-  transform: translateY(-1px);
 }
-.titlebar-credit:active { transform: translateY(0); }
 .credit-mark {
   width: 20px; height: 20px;
   border-radius: var(--radius-pill);
   display: block;
   flex-shrink: 0;
-  filter: drop-shadow(0 2px 6px rgba(106,77,255,0.30));
+  filter: drop-shadow(0 2px 6px rgba(106,77,255,0.12));
 }
 
 /* ── Topbar ───────────────────────────────────────────────────────────────── */
@@ -130,7 +133,9 @@ body {
   border-radius: var(--radius-md);
   display: block;
   background: transparent;
-  filter: drop-shadow(0 6px 18px rgba(106,77,255,0.30));
+  /* Soft violet ambient under the logo — was 0.30 alpha which read as a halo.
+     Halved so the logo carries identity color without glowing. */
+  filter: drop-shadow(0 4px 12px rgba(106,77,255,0.15));
 }
 .brand-text { display: flex; flex-direction: column; min-width: 0; }
 .brand-eyebrow {
@@ -150,7 +155,7 @@ body {
 
 .kpi-row {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: stretch;
   align-self: center;
 }
@@ -167,11 +172,16 @@ body {
   min-width: 92px;
   border-radius: var(--radius-md);
   border: 1px solid;            /* color set per kind below */
-  transition: transform var(--dur-fast) var(--ease-out),
-              filter var(--dur) var(--ease-out);
-  cursor: default;
+  transition: transform var(--dur-fast) var(--ease-out);
+  cursor: pointer;
+  user-select: none;
 }
-.kpi:hover { transform: translateY(-1px); filter: brightness(1.10); }
+/* Calm hover: just a 1px lift and a tiny border opacity bump. brightness(1.10)
+   was previously here and read as a flashlight — same pattern we removed
+   from .btn-brand. */
+.kpi:hover { transform: translateY(-1px); }
+/* No visual indicator on the active KPI — they act purely as click shortcuts;
+   the chip row is the source of truth for which filter is active. */
 
 .kpi[data-kind="total"]    { background: var(--tile-violet-bg); border-color: var(--brand-500); color: var(--brand-300); }
 .kpi[data-kind="progress"] { background: var(--warning-soft);   border-color: var(--warning);   color: var(--warning); }
@@ -222,17 +232,56 @@ body {
 .btn:active, .btn-ghost:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* Solid-edge brand button — kills the "bottom hairline" that earlier
+   revisions struggled with. Root cause: the gradient is positioned at the
+   padding-box (default background-origin), so a `border: 1px solid
+   transparent` left a 1-pixel-thin ring of the parent's background
+   visible around the button. Against the page that ring read as a faint
+   white line at the bottom edge where the gradient was darkest.
+   Three lines of defense, in order of importance:
+     1. `background-color` matching the gradient bottom — fills the ring.
+     2. Opaque `border-color` matching the gradient bottom — same value
+        as the fallback color, so even at full subpixel zoom there's no
+        seam between the painted gradient and the painted border.
+     3. `background-origin: border-box` extends the gradient through the
+        border area itself, eliminating the seam entirely on browsers
+        that honour it.
+   Hover now shifts BOTH gradient stops one ramp step lighter (brand-400
+   over brand-500) — visible enough to read as interactive without the
+   brightness-filter blowout that the user pushed back on. No shadow. */
 .btn-brand {
-  background: linear-gradient(180deg, var(--brand-500), var(--brand-600));
+  background-color: var(--brand-600);
+  background-image: linear-gradient(180deg, var(--brand-500), var(--brand-600));
+  background-origin: border-box;
+  background-clip: border-box;
   color: #fff;
-  border-color: transparent;
-  box-shadow: var(--shadow-brand);
+  border: 1px solid var(--brand-600);
+  box-shadow: none;
 }
 .btn-brand:hover {
-  background: linear-gradient(180deg, var(--brand-400), var(--brand-500));
-  box-shadow: 0 6px 18px -10px rgba(106, 77, 255, 0.35);
+  /* Fractional lift via color-mix — both stops shift ~22% toward the next
+     lighter ramp step. Full ramp shifts (e.g. brand-500→brand-400) read as
+     too punchy; only the bottom darkening read as too subtle. ~22% is the
+     in-between dial — perceptible but not loud. Adjust the percentages if
+     it still reads off; the bottom-line and shadow halos are already gone. */
+  background-color: var(--brand-600);
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--brand-400) 22%, var(--brand-500)) 0%,
+    color-mix(in srgb, var(--brand-500) 22%, var(--brand-600)) 100%);
+  border-color: var(--brand-600);
+  box-shadow: none;
 }
-.btn-brand:active { box-shadow: var(--shadow-brand); }
+.btn-brand:active {
+  background-color: var(--brand-700);
+  background-image: linear-gradient(180deg, var(--brand-600), var(--brand-700));
+  border-color: var(--brand-700);
+  box-shadow: none;
+}
+.btn-brand:focus { outline: 0; }
+.btn-brand:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--ring-brand);
+}
 
 .btn-secondary {
   background: var(--surface-2);
@@ -254,6 +303,7 @@ body {
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px;
+  padding: 0;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -262,6 +312,76 @@ body {
   transition: background var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
 .icon-btn:hover { background: var(--surface-3); color: var(--fg-1); }
+
+/* Primary-action button in the modal header — small brand-violet text
+   button (NOT an icon button) sized to sit comfortably to the left of
+   the .modal-close X without overpowering it. Same hover and active
+   ramp as .btn-brand so the calm-hover language stays consistent. */
+.modal-confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: var(--tracking-snug);
+  background-color: var(--brand-600);
+  background-image: linear-gradient(180deg, var(--brand-500), var(--brand-600));
+  background-origin: border-box;
+  background-clip: border-box;
+  color: #fff;
+  border: 1px solid var(--brand-600);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              opacity var(--dur) var(--ease-out);
+}
+.modal-confirm:hover {
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--brand-400) 22%, var(--brand-500)) 0%,
+    color-mix(in srgb, var(--brand-500) 22%, var(--brand-600)) 100%);
+}
+.modal-confirm:active {
+  background-color: var(--brand-700);
+  background-image: linear-gradient(180deg, var(--brand-600), var(--brand-700));
+  border-color: var(--brand-700);
+}
+.modal-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.modal-confirm:disabled:hover {
+  background-image: linear-gradient(180deg, var(--brand-500), var(--brand-600));
+}
+
+/* Folder icon optical balance — the SVG path is geometrically centered in
+   its 24×24 viewBox, but the folder "tab" hangs off the upper-left and
+   shifts the visual centre of gravity left when the icon sits next to a
+   text label. The 1px right nudge applies only in those text-accompanied
+   contexts (Settings "Browse" buttons, etc.) where the asymmetry reads
+   most. Inside a square `.icon-btn` the icon is alone with equal padding
+   on all sides — any transform there throws off the centering, so the
+   override below resets it. */
+.ic-folder { transform: translateX(1px); }
+/* Inside a square `.icon-btn` every SVG renders as a block (no inline
+   baseline whitespace) and is promoted to its own GPU layer via
+   `translateZ(0)`. Chromium rasterizes layers at integer pixel
+   coordinates, so the icon is identically antialiased on every card
+   regardless of where the parent card lands on the subpixel grid
+   (the auto-fill `1fr` columns put each card at a slightly different
+   x offset). geometricPrecision keeps the stroke math consistent. */
+.icon-btn > svg {
+  display: block;
+  shape-rendering: geometricPrecision;
+  transform: translateZ(0);
+}
+/* Optical nudge: the close X measures pixel-centered, but fractional display
+   scaling makes it read slightly high in the modal header — drop it ~0.5px so
+   it looks centred. (Same optical-correction approach as .ic-folder.) */
+.icon-btn.modal-close > svg { transform: translateZ(0) translateY(0.5px); }
 
 /* ── Vendor-branded buttons ──────────────────────────────────────────────── */
 /* Default state is neutral (matches the rest of the surface). The brand color
@@ -295,25 +415,24 @@ body {
    icon weight so all three read the same size on the chip. */
 .vendor-btn .vendor-mark svg { display: block; }
 .vendor-vscode .vendor-mark svg { width: 15px; height: 15px; }
-.vendor-claude .vendor-mark svg { width: 14px; height: 14px; }
+.vendor-claude .vendor-mark svg { width: 17px; height: 17px; }
 .vendor-codex  .vendor-mark svg { width: 16px; height: 16px; }
 .vendor-btn .vendor-label { line-height: 1; letter-spacing: 0.01em; }
 
-/* Hover only flips the BUTTON fill from neutral to brand. The icon and chip
-   stay the same (white logo on translucent-white chip), so the logo is always
-   visible regardless of state. */
+/* Hover flips the button fill from neutral to brand. No colored drop shadow
+   — the previous 0.55-alpha halos read as a bright glow under each button
+   (same "bottom line" pattern we removed from .btn-brand). The fill swap is
+   strong enough on its own to signal the interactive state. */
 .vendor-vscode:hover {
   background: linear-gradient(180deg, #1A8FDC, #007ACC);
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 6px 18px -8px rgba(0, 122, 204, 0.55);
 }
 
 .vendor-claude:hover {
   background: linear-gradient(180deg, #E08762, #D97757);
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 6px 18px -8px rgba(217, 119, 87, 0.55);
 }
 
 /* Codex / OpenAI: brand color #F9F9F9 (off-white). White surface fills the
@@ -322,7 +441,6 @@ body {
   background: linear-gradient(180deg, #ffffff, #f1f1f1);
   border-color: transparent;
   color: #0a0a0a;
-  box-shadow: 0 6px 18px -8px rgba(255, 255, 255, 0.40);
 }
 .vendor-codex:hover .vendor-mark { color: #0a0a0a; }
 
@@ -380,7 +498,9 @@ body {
   background: var(--brand-500);
   border-color: transparent;
   color: #fff;
-  box-shadow: var(--shadow-brand);
+  /* No box-shadow — the violet halo that --shadow-brand projects below the
+     pill reads as a fuzzy "bottom line" against the page surface. Same
+     pattern we stripped from .btn-brand for the same reason. */
 }
 .chip .count {
   font-variant-numeric: tabular-nums;
@@ -421,6 +541,16 @@ body {
 }
 
 /* ── Card ─────────────────────────────────────────────────────────────────── */
+/* Stability rules to prevent the "blank card on fast scroll" issue:
+   - No backdrop-filter: --surface is 93–97% opaque so the blur was visually
+     negligible but forced Chromium to re-rasterize each tile on scroll.
+   - `transform: translateZ(0)` pre-promotes every card to its own GPU layer
+     at load. Without this, the :hover transform creates a fresh layer the
+     first time the cursor enters a card during scroll — that layer is briefly
+     unrasterized, which is the blank flash we were seeing. Pre-promoting also
+     prevents the demote-on-leave that compounds the thrash.
+   - `backface-visibility: hidden` keeps the layer rasterized when off-screen
+     so it's ready immediately when scrolled back into view. */
 .card {
   position: relative;
   background: var(--surface);
@@ -428,8 +558,8 @@ body {
   border-radius: var(--radius-xl);
   padding: 18px 20px 16px;
   display: flex; flex-direction: column; gap: 14px;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  transform: translateZ(0);
+  backface-visibility: hidden;
   box-shadow: var(--shadow), var(--shadow-inset);
   transition: transform var(--dur) var(--ease-out),
               border-color var(--dur) var(--ease-out),
@@ -438,8 +568,13 @@ body {
 }
 .card:hover {
   border-color: var(--ring);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-lg), var(--shadow-inset);
+  /* translate3d keeps the Z component so the layer stays GPU-composited
+     (a plain translateY would replace the translateZ(0) baseline and risk
+     a layer demote/re-promote round-trip during scroll). */
+  transform: translate3d(0, -1px, 0);
+  /* Keep the base shadow on hover — the previous .shadow-lg lift created a
+     pronounced halo under each card that compounded across the grid as the
+     cursor moved. Border color brighten is enough hover signal. */
 }
 .card[data-status="archived"] { opacity: 0.78; }
 
@@ -464,7 +599,7 @@ body {
 }
 
 .card-meta {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   font-size: 11px;
   color: var(--fg-3);
 }
@@ -490,6 +625,26 @@ body {
 .stack-badge[data-stack="Rust"]   { background: var(--tile-red-bg);    color: var(--tile-red-fg); }
 .stack-badge[data-stack="Go"]     { background: var(--tile-blue-bg);   color: var(--tile-blue-fg); }
 .stack-badge[data-stack="Unknown"]{ background: var(--surface-2);      color: var(--fg-3); }
+/* Secondary stack badge (polyglot projects). Dimmed a touch and tucked
+   right against the primary so it reads as supporting metadata, not a
+   competing label. */
+.stack-badge-secondary { margin-left: 4px; opacity: 0.72; }
+
+/* Global suppression when the Settings → Card display toggle is off. JS in
+   buildCard already empties the strip; this is a defensive net for any
+   path that ever clones a card template without going through that branch.
+   The toggle controls the whole tech-meta row — framework badge AND the
+   GIT/VERCEL/ENV indicators — so a card with the toggle off renders only
+   the title, the status picker, the path, and the languages row. */
+body[data-show-stack-badge="false"] .card-meta { display: none !important; }
+body[data-show-stack-badge="false"] .stack-badge,
+body[data-show-stack-badge="false"] .indicators,
+body[data-show-stack-badge="false"] .ind { display: none !important; }
+
+/* Parallel rule for the language-badges toggle — kills the whole row when
+   off so the card stops at the path. JS already hides it via row.hidden in
+   renderLanguages; this is the same belt-and-braces guarantee. */
+body[data-show-language-badges="false"] .card-row-langs { display: none !important; }
 
 .indicators { display: inline-flex; gap: 6px; }
 .ind {
@@ -505,30 +660,57 @@ body {
   color: var(--fg-3);
 }
 .ind[data-kind="git"]    { color: var(--tile-orange-fg); }
-.ind[data-kind="claude"] { color: var(--tile-violet-fg); }
 .ind[data-kind="vercel"] { color: var(--fg-1); }
 .ind[data-kind="env"]    { color: var(--tile-green-fg); }
 
-.source-pill {
+/* Languages row — no label, just the colour chips. Single-line by design:
+   the row never wraps, and each chip shrinks (with an ellipsizing name) so
+   3-4 languages always fit in the card width even on the narrowest layout. */
+.card-row-langs { align-items: center; }
+.languages {
+  flex: 1;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.lang-badge {
   display: inline-flex; align-items: center;
-  padding: 2px 7px;
-  border-radius: var(--radius-xs);
+  gap: 5px;
+  /* min-width:0 lets the chip shrink below its content size so the inner
+     name span's overflow:hidden + ellipsis can actually engage; without it
+     flexbox refuses to shrink past content width and the row pushes out. */
+  min-width: 0;
+  flex: 0 1 auto;
+  /* Status-pill register: pill-rounded silhouette + roomier horizontal
+     padding so the tinted background reads as a soft pill instead of a
+     tight tag. Background / border / text color are set inline per-badge
+     so each language keeps its own hue (see makeLangBadge in app.js). */
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
   font-size: 10px;
-  letter-spacing: var(--tracking-wide);
+  line-height: 1.4;
+  letter-spacing: var(--tracking-snug);
   text-transform: uppercase;
-  font-weight: 700;
-  background: rgba(106,77,255,0.18);
-  border: 1px solid rgba(106,77,255,0.30);
-  color: var(--brand-300);
-}
-
-.mtime {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  border: 1px solid transparent;
   font-variant-numeric: tabular-nums;
-  color: var(--fg-3);
+  white-space: nowrap;
 }
+.lang-badge-name {
+  /* The shrinkable half — ellipsizes when there isn't room for the full
+     language name. The percent next to it stays full size so the data the
+     user actually scans (the number) is never the part that gets clipped. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lang-badge-pct {
+  flex: 0 0 auto;
+}
+.lang-badge-other { opacity: 0.85; }
 
 .card-row { display: flex; align-items: center; gap: 8px; }
 .label {
@@ -554,7 +736,7 @@ body {
   letter-spacing: var(--tracking-snug);
 }
 .status-pill:hover { color: var(--fg-1); border-color: var(--ring); }
-.status-pill[aria-selected="true"][data-color="brand"]    { background: var(--brand-500);    border-color: transparent; color: #fff; box-shadow: var(--shadow-brand); }
+.status-pill[aria-selected="true"][data-color="brand"]    { background: var(--brand-500);    border-color: transparent; color: #fff; }
 .status-pill[aria-selected="true"][data-color="success"]  { background: var(--success-soft); border-color: var(--success); color: var(--success); }
 .status-pill[aria-selected="true"][data-color="warning"]  { background: var(--warning-soft); border-color: var(--warning); color: var(--warning); }
 .status-pill[aria-selected="true"][data-color="danger"]   { background: var(--danger-soft);  border-color: var(--danger);  color: var(--danger); }
@@ -562,21 +744,6 @@ body {
 .status-pill[aria-selected="true"][data-color="muted"]    { background: var(--surface-3);    border-color: var(--ring);    color: var(--fg-2); }
 /* Archived = a deeper, more committed gray than the soft "muted" surface — clearly inactive without disappearing. */
 .status-pill[aria-selected="true"][data-color="archived"] { background: #2a2a30; border-color: rgba(255,255,255,0.12); color: #a1a1aa; }
-
-.notes {
-  flex: 1;
-  font: inherit;
-  font-size: 12px;
-  color: var(--fg-1);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  outline: none;
-  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
-}
-.notes::placeholder { color: var(--fg-4); }
-.notes:focus { border-color: rgba(255,255,255,0.18); background: var(--surface-3); }
 
 .card-path-row {
   display: flex;
@@ -587,32 +754,85 @@ body {
 .card-path {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--fg-4);
   background: var(--bg-2);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  /* Right padding tight so the copy button hugs the edge without
+     looking like it floats inside extra space. */
+  padding: 4px 4px 4px 8px;
+  /* Whole pill is the click target — copies the path on click. The icon
+     inside is a visual hint, not the only target. */
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              color var(--dur) var(--ease-out);
+}
+/* No click highlight on the path pill — the "Path copied" toast is the
+   confirmation. Hover still gently brightens the text + icon so the pill
+   reads as interactive, but :active and :focus-visible are intentionally
+   no-ops so clicking the pill doesn't flash the row. */
+.card-path:hover {
+  color: var(--fg-3);
+}
+.card-path:hover .card-path-copy { color: var(--fg-1); }
+.card-path:active,
+.card-path:focus,
+.card-path:focus-visible {
+  background: var(--bg-2);
+  border-color: var(--border-soft);
+  outline: 0;
+  box-shadow: none;
+}
+.card-path-text {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.card-path-row .last-backup {
+.card-path-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--fg-3);
+  cursor: pointer;
+  border-radius: 4px;
   flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-4);
-  white-space: nowrap;
+  transition: color var(--dur) var(--ease-out),
+              background var(--dur) var(--ease-out);
 }
-
-.card-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 2px; }
+.card-path-copy:hover {
+  color: var(--fg-1);
+  background: transparent;
+}
+/* No click flash on the inner icon — paired with the pill's flat :active so
+   nothing in the row lights up when you click. The toast does the talking. */
+.card-path-copy:active,
+.card-path-copy:focus,
+.card-path-copy:focus-visible {
+  background: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+.card-path-copy svg { display: block; }
+/* No margin-top — the card's own gap:14px sets the rhythm; the extra 2px
+   here used to make this row sit 2px lower than the path-row above it,
+   breaking the card's internal spacing consistency. */
+.card-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .card-actions .btn { padding: 9px 10px; }
 .card-actions .vendor-label { font-size: 12px; }
-
-.last-backup[data-state="busy"]    { color: var(--fg-2); }
-.last-backup[data-state="success"] { color: var(--success); }
-.last-backup[data-state="error"]   { color: var(--danger); }
 
 .btn[data-busy="true"] { pointer-events: none; opacity: 0.85; }
 .btn[data-busy="true"] svg { animation: spin 0.7s linear infinite; }
@@ -635,7 +855,7 @@ body {
 .toaster {
   position: fixed;
   right: 24px; bottom: 24px;
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: 8px;
   z-index: 50;
   pointer-events: none;
 }
@@ -649,18 +869,25 @@ body {
   border: 1px solid var(--border);
   border-left: 3px solid var(--brand-500);
   border-radius: var(--radius-md);
-  padding: 12px 16px 12px 13px;
-  min-width: 280px;
-  max-width: 400px;
+  padding: 9px 18px 9px 14px;
+  min-width: 320px;
+  max-width: 460px;
   font-size: 13px;
   color: var(--fg-1);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(106,77,255,0.40);
+  /* Base elevation only — the per-kind data-* selectors below layer a
+     softer colored second shadow that matches the semantic accent. Used
+     to be 0.40 alpha here on the base; that was the loudest violet in the
+     file and read as a halo before any kind was applied. */
+  box-shadow: var(--shadow-lg);
   animation: slide-in 220ms var(--ease-out);
 }
+.toast-body { min-width: 0; }
 .toast .t-title { font-weight: 600; margin: 0; line-height: 1.3; }
-.toast .t-sub   { color: var(--fg-3); font-size: 12px; line-height: 1.4; margin-top: 2px; }
+/* Sub stays on a single line — never wraps to two — so every toast reads at a
+   consistent height. Descriptions are kept short enough to show in full. */
+.toast .t-sub   { color: var(--fg-3); font-size: 12px; line-height: 1.4; margin-top: 2px; white-space: nowrap; }
 
 .toast-icon {
   width: 32px; height: 32px;
@@ -671,17 +898,19 @@ body {
 }
 .toast-icon svg { width: 16px; height: 16px; }
 
-/* Default + info = brand violet (the brand color, NOT blue — blue is reserved for VS Code). */
-.toast[data-kind="info"] { border-left-color: var(--brand-500); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(106, 77, 255, 0.45); }
+/* Per-kind colored glow is softened from 0.45 → 0.20 — the previous strength
+   read as the same halo pattern we removed from CTAs. At 0.20 the semantic
+   color still tints the ambient under each toast without dominating. */
+.toast[data-kind="info"] { border-left-color: var(--brand-500); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(106, 77, 255, 0.20); }
 .toast[data-kind="info"] .toast-icon { background: rgba(106, 77, 255, 0.18); color: var(--brand-300); }
 
-.toast[data-kind="success"] { border-left-color: var(--success); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(52, 211, 153, 0.45); }
+.toast[data-kind="success"] { border-left-color: var(--success); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(52, 211, 153, 0.20); }
 .toast[data-kind="success"] .toast-icon { background: var(--success-soft); color: var(--success); }
 
-.toast[data-kind="error"]   { border-left-color: var(--danger);  box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(248, 113, 113, 0.45); }
+.toast[data-kind="error"]   { border-left-color: var(--danger);  box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(248, 113, 113, 0.20); }
 .toast[data-kind="error"]   .toast-icon { background: var(--danger-soft);  color: var(--danger); }
 
-.toast[data-kind="warning"] { border-left-color: var(--warning); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(251, 191, 36, 0.45); }
+.toast[data-kind="warning"] { border-left-color: var(--warning); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(251, 191, 36, 0.20); }
 .toast[data-kind="warning"] .toast-icon { background: var(--warning-soft); color: var(--warning); }
 
 @keyframes slide-in {
@@ -700,6 +929,11 @@ body {
   padding: 24px;
 }
 .modal.is-open { display: flex; }
+/* Lock background scroll while any modal is open so wheel/touch events on
+   the backdrop don't sneak through to the project grid behind. The modal's
+   own card has its own internal scroll container if its content overflows,
+   so this only suppresses *page* scroll, not in-modal scroll. */
+body:has(.modal.is-open) { overflow: hidden; }
 .modal-backdrop {
   position: absolute; inset: 0;
   background: rgba(0,0,0,0.55);
@@ -739,7 +973,11 @@ body {
 }
 .modal-body { padding: 8px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
 .modal-help { color: var(--fg-3); font-size: 13px; margin: 0; line-height: 1.5; }
-.modal-input-row { display: flex; gap: 8px; }
+.modal-input-row { display: flex; gap: 8px; align-items: stretch; }
+/* Every control in a modal input row (input, Browse, Add, the input-with-paste
+   wrapper) shares the same 40px box, so the row reads as a single horizontal
+   strip aligned with the .path-item chips above it. */
+.modal-input-row > * { min-height: 40px; }
 .modal-input-row input {
   flex: 1;
   padding: 10px 12px;
@@ -782,15 +1020,25 @@ body {
 }
 .paste-icon-btn:hover { background: var(--surface-3); color: var(--fg-1); }
 .modal-error { color: var(--danger); font-size: 12px; min-height: 14px; }
+/* When there's no error message the node is empty (JS sets textContent = "").
+   Collapse it entirely so it neither reserves min-height nor triggers the
+   parent flex gap — otherwise it leaves a dead band above the modal footer. */
+.modal-error:empty { display: none; }
 .modal-foot {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding: 12px 20px 18px;
   border-top: 1px solid var(--border-soft);
 }
 .modal-foot .grow { flex: 1; }
+/* The global .btn-ghost is intentionally smaller (8px padding) for inline use,
+   which left the footer's Reset/Cancel 4px shorter than the brand "Save" button.
+   Restore the base 10px padding on the footer's own ghost buttons so all three
+   footer buttons are the same height. Scoped to direct children so the
+   multi-row wizard/release footers (which wrap buttons in .modal-foot-row) are
+   untouched. */
+.modal-foot > .btn-ghost { padding: 10px 14px; }
 
 /* ── Prepare for GitHub modal ────────────────────────────────────────────── */
-.gh-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .gh-field { display: flex; flex-direction: column; gap: 4px; }
 .gh-label  { font-size: 11px; font-weight: 700; letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--fg-3); }
 .gh-field input {
@@ -800,7 +1048,6 @@ body {
 }
 .gh-field input:focus { border-color: rgba(255,255,255,0.18); background: var(--surface-3); }
 
-.gh-audit { display: flex; flex-direction: column; gap: 8px; }
 .gh-audit-loading { color: var(--fg-3); font-size: 13px; padding: 8px 0; }
 .gh-row {
   display: flex; gap: 10px; align-items: flex-start;
@@ -839,6 +1086,305 @@ body {
 
 .gh-status { font-size: 12px; color: var(--fg-3); }
 
+/* ── Publish wizard ─────────────────────────────────────────────────────── */
+/* Per-step <section> panes inside the wizard. Only one is visible at a time
+   (JS toggles the `hidden` attribute). Layout-only — no decoration of its own. */
+.gh-step-pane {
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+.gh-field-label {
+  font-size: 11px; font-weight: 700; letter-spacing: var(--tracking-wide);
+  text-transform: uppercase; color: var(--fg-3);
+  display: block; margin-bottom: 4px;
+}
+.gh-field-hint { font-weight: 500; text-transform: none; color: var(--fg-3); opacity: 0.7; }
+.gh-field input,
+.gh-field textarea {
+  width: 100%;
+  background: var(--surface-2); color: var(--fg-1);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 9px 11px; font: inherit; font-size: 13px;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.gh-field textarea { resize: vertical; min-height: 96px; line-height: 1.45; }
+.gh-field input:focus,
+.gh-field textarea:focus { outline: none; border-color: rgba(255,255,255,0.18); background: var(--surface-3); }
+
+.gh-checkbox { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-2); cursor: pointer; }
+.gh-checkbox input { accent-color: var(--brand-500); }
+
+/* Method picker — two compact tap targets used by the Publish to GitHub
+   modal and the Backup modal. Sized so the icon, title, and 2-line
+   description fit without crowding. The RECOMMENDED / QUICK / ROUTINE
+   badge in the top-right is absolute, so card padding doesn't push it off. */
+.gh-method-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gh-method-card {
+  position: relative;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface-2); color: var(--fg-1);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  text-align: left; cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              background var(--dur) var(--ease-out);
+}
+.gh-method-card:hover { transform: translateY(-1px); border-color: var(--ring); }
+/* Active state — confident brand expression. Stronger vertical gradient
+   (brand-500 at ~30% top → ~12% bottom) plus an inset 1px brand stroke
+   firms up the selection edge. An additional inset violet bloom from the
+   top creates a "lit from above" effect that reads as brand color rather
+   than flat washed violet. Icon flips to white; sub text + tag tint up to
+   stay readable against the deeper background. */
+.gh-method-card[aria-checked="true"] {
+  border-color: var(--brand-500);
+  background: linear-gradient(180deg, rgba(106,77,255,0.30), rgba(106,77,255,0.12));
+  box-shadow: inset 0 18px 32px -16px rgba(106,77,255,0.45);
+  color: var(--fg-1);
+}
+.gh-method-card[aria-checked="true"]:hover { transform: none; }
+.gh-method-card[aria-checked="true"] .gh-method-sub { color: rgba(255,255,255,0.82); }
+.gh-method-card[aria-checked="true"] .gh-method-tag { color: var(--fg-1); background: rgba(255,255,255,0.16); }
+.gh-method-card[aria-checked="true"] .gh-method-sub code {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.95);
+}
+/* Disabled state — used by the Backup modal's "Replace current" option when
+   the project has no prior backup to overwrite. Greys out, blocks hover lift,
+   and intercepts pointer events so clicks fall through to no-op. */
+.gh-method-card[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.gh-method-icon {
+  color: var(--fg-2);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.gh-method-card[aria-checked="true"] .gh-method-icon { color: #fff; }
+.gh-method-title { font-family: var(--font-display); font-weight: 700; font-size: 14px; line-height: 1.2; }
+.gh-method-sub   { font-size: 12px; color: var(--fg-3); line-height: 1.4; }
+.gh-method-sub code {
+  background: rgba(255,255,255,0.06); padding: 0 4px; border-radius: 3px; font-size: 11px;
+}
+.gh-method-tag {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  background: var(--surface-3);
+  /* Generous breathing room — vertical (top 6 / bottom 4) and horizontal 9
+     so the text sits clearly inside the pill rather than hugging the edges.
+     Asymmetric vertical padding compensates for uppercase-only text reading
+     visually high inside its line-box (no descenders), pulling the glyphs
+     down 1px to land optically centred. */
+  padding: 6px 9px 4px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* Visibility — segmented slider sitting in the modal header, left of the
+   close button. Single pill with two halves; the violet "thumb" slides
+   between them via a transform so it animates instead of snapping. The
+   active half also gets brighter foreground text. */
+.modal-head-aux { display: inline-flex; align-items: center; gap: 10px; }
+.gh-vis-segment {
+  position: relative;
+  /* inline-grid with 1fr 1fr forces each column to size to the WIDER
+     of the two button labels — so both halves end up the same width
+     even when labels are asymmetric (e.g., Overwrite / New release).
+     The absolutely-positioned thumb at width: calc(50% - 2px) then
+     lines up exactly on each half. inline-flex would shrink-to-fit
+     each child individually and the 50% thumb wouldn't match. */
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  user-select: none;
+}
+.gh-vis-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: calc(50% - 2px);
+  height: calc(100% - 4px);
+  border-radius: 999px;
+  background: var(--tile-violet-bg);
+  border: 1px solid var(--brand-500);
+  transition: transform var(--dur) var(--ease-out);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.gh-vis-segment[data-active="private"] .gh-vis-thumb,
+.gh-vis-segment[data-active="release"] .gh-vis-thumb {
+  transform: translateX(100%);
+}
+.gh-vis-opt {
+  position: relative;
+  z-index: 1;
+  /* Width is owned by the parent grid (1fr columns) — buttons stretch
+     to fill their column. text-align centers the label inside. */
+  text-align: center;
+  padding: 5px 14px;
+  font: inherit; font-size: 12px; font-weight: 600;
+  color: var(--fg-3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out);
+  white-space: nowrap;
+}
+.gh-vis-segment[data-active="public"]    .gh-vis-opt[data-value="public"],
+.gh-vis-segment[data-active="private"]   .gh-vis-opt[data-value="private"],
+.gh-vis-segment[data-active="overwrite"] .gh-vis-opt[data-value="overwrite"],
+.gh-vis-segment[data-active="release"]   .gh-vis-opt[data-value="release"] {
+  color: var(--fg-1);
+}
+/* ── Add Project modal ──────────────────────────────────────────────────── */
+.add-pane { display: flex; flex-direction: column; gap: 14px; }
+/* The field is monospace (so paths read cleanly), but in mono a single space
+   is a full character cell and reads like a big/double gap when typing a folder
+   NAME with spaces. Tighten word-spacing so one space looks like one space.
+   Backslash-separated path segments are unaffected (no spaces between them). */
+#add-path { word-spacing: -0.25em; }
+/* Pull the description up tight under the "Add Project" title so it reads as a
+   subtitle (scoped to this modal — other modals keep their default spacing). */
+#modal-add .modal-body { padding-top: 0; }
+#modal-add .add-pane > .modal-help { margin-top: -2px; }
+/* Field = .gh-label + control, reusing the app's canonical label component
+   (also used by the GitHub / release / backup modals) for a consistent look. */
+.add-field { display: flex; flex-direction: column; gap: 7px; }
+
+/* Quick-pick chips — one per scan folder. Clicking prefills the field with
+   "<scan folder>\" so typing a name flips straight to "Create". */
+.add-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1px; }
+.add-quick[hidden] { display: none; }
+.add-quick-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 100%;
+  font: inherit; font-size: 11px; font-weight: 600;
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px; cursor: pointer;
+  transition: background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.add-quick-chip:hover { background: var(--surface-3); border-color: var(--ring); color: var(--fg-1); }
+/* Selected destination — the folder a new project will be created in. */
+.add-quick-chip[aria-pressed="true"] {
+  background: var(--tile-violet-bg);
+  border-color: var(--brand-500);
+  color: var(--brand-300);
+}
+.add-quick-chip[aria-pressed="true"] .add-quick-plus { color: var(--brand-300); }
+/* The "+" glyph baseline-sits low; line-height:1 + a 1px lift optically
+   centres it against the label. */
+.add-quick-plus { flex: none; font-size: 13px; font-weight: 700; line-height: 1; transform: translateY(-1px); }
+.add-quick-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Smart status readout — neutral for "connect", violet for "create" (same
+   token as the Total KPI tile), danger for problems. Mirrors the design of
+   the other modal callouts. */
+.add-status {
+  padding: 9px 12px; border-radius: var(--radius-md);
+  font-size: 12px; line-height: 1.45;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--fg-2);
+}
+.add-status[hidden] { display: none; }
+.add-status strong { color: var(--fg-1); font-weight: 700; }
+.add-status .add-status-path {
+  display: block; margin-top: 4px;
+  font-family: var(--font-mono); color: var(--fg-1); word-break: break-all;
+}
+.add-status[data-kind="create"] { background: var(--tile-violet-bg); border-color: var(--brand-500); color: var(--brand-300); }
+.add-status[data-kind="create"] strong { color: #fff; }
+.add-status[data-kind="error"]  { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.40); color: var(--danger); }
+.add-status[data-kind="error"] strong { color: var(--danger); }
+
+/* Primary action — full-width brand button. Disabled until the path resolves
+   to a valid connect/create target. */
+.add-submit-btn { width: 100%; min-height: 40px; justify-content: center; }
+
+/* CLI picker (Step 2a) — smaller cards, two columns. */
+.gh-cli-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gh-cli-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface-2); color: var(--fg-1);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.gh-cli-card:hover { transform: translateY(-1px); border-color: var(--ring); }
+.gh-cli-card[aria-checked="true"] {
+  border-color: var(--brand-500);
+  background: var(--tile-violet-bg);
+  box-shadow: 0 0 0 1px var(--brand-500) inset;
+}
+.gh-cli-icon { color: var(--brand-300); }
+.gh-cli-card[aria-checked="true"] .gh-cli-icon { color: var(--brand-100, #fff); }
+.gh-cli-title { font-weight: 600; font-size: 14px; }
+.gh-step-help    { color: var(--fg-3); font-size: 13px; margin: 0; }
+/* Empty summary collapses entirely (no reserved min-height) so the modal
+   shrinks to its actual content when no CLI has been picked yet. The
+   :empty pseudo-class also removes the gap contribution above it. */
+.gh-step-summary { color: var(--fg-2); font-size: 12px; margin: 0; }
+.gh-step-summary:empty { display: none; }
+
+/* Multi-row footer (wizard + release modal). The outer .modal-foot becomes
+   layout-invisible via `display: contents` so each .modal-foot-row sits
+   directly under .modal-card as its own flex item — and inherits the same
+   visual chrome (border-top + padding) as the original single .modal-foot. */
+.modal-foot:has(.modal-foot-row) {
+  display: contents; padding: 0; border-top: 0;
+}
+.modal-foot-row {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 12px 20px 18px;
+  /* No border-top here — the buttons sit flush against the body for a
+     less-segmented feel. */
+}
+.modal-foot-row .grow { flex: 1; }
+/* Collapse footer rows that contain no visible buttons. The Step 1 row of
+   the Publish-to-GitHub wizard (#gh-foot-method) is structurally empty —
+   its only button (#gh-method-next) is permanently [hidden] because the
+   header #gh-confirm icon proxies for it — so without this rule the row
+   adds ~30px of phantom padding under the method picker. */
+.modal-foot-row:not(:has(.btn:not([hidden]))) { display: none; }
+
+/* GitHub visit chip — pill that lives next to .icon-btn siblings in the
+   card title row. Height pinned to 28px so it aligns exactly with the
+   28x28 .icon-btn squares (folder + ⋯) regardless of font metrics. */
+.gh-visit-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  background: var(--tile-violet-bg);
+  color: var(--tile-violet-fg, var(--brand-300));
+  border: 1px solid var(--brand-500);
+  border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: 600;
+  letter-spacing: var(--tracking-snug);
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.gh-visit-badge:hover { transform: translateY(-1px); background: var(--surface-3); }
+.gh-visit-badge svg   { display: block; flex-shrink: 0; }
+.gh-visit-badge span  { line-height: 1; }
+
 /* ── Settings sections ───────────────────────────────────────────────────── */
 .settings-section {
   padding: 14px 0;
@@ -862,6 +1408,92 @@ body {
 }
 .settings-help em { font-style: normal; color: var(--warning); font-weight: 600; }
 
+/* Toggle row — title + sub-help on the left, switch on the right. The whole
+   label is clickable; the .switch element on the right is a styled wrapper
+   around a real checkbox so accessibility (focus, screen readers, form
+   semantics) still works while the visible control reads as an iOS-style
+   switch. */
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+/* When a section hosts several toggle rows (Card display → tech badges +
+   language badges), space them so each row reads as its own option without
+   needing per-row borders. */
+.settings-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+.settings-toggle-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-toggle-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+/* When the section title + help paragraph live inside a toggle row, their
+   default block margins push the switch out of vertical alignment. Reset
+   them so the row stays a tight two-line unit and the switch sits centered
+   against both lines. */
+.settings-toggle-label .settings-title,
+.settings-toggle-label .settings-help { margin: 0; }
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+.switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--surface-3, rgba(255,255,255,0.10));
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out);
+}
+.switch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--fg-2);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  transition: left var(--dur) var(--ease-out),
+              background var(--dur) var(--ease-out);
+}
+.switch input:checked + .switch-track {
+  background: var(--brand-500);
+  border-color: var(--brand-500);
+}
+.switch input:checked + .switch-track .switch-thumb {
+  left: 18px;
+  background: #fff;
+}
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--brand-300);
+  outline-offset: 2px;
+}
+
 /* Logo row */
 .logo-row { display: flex; gap: 14px; align-items: center; }
 .logo-actions { display: flex; flex-direction: row; gap: 8px; flex-wrap: wrap; }
@@ -871,76 +1503,39 @@ body {
   border: 1px solid var(--border);
   background: var(--bg-2);
   flex-shrink: 0;
-  filter: drop-shadow(0 6px 18px rgba(106,77,255,0.20));
+  filter: drop-shadow(0 4px 12px rgba(106,77,255,0.12));
 }
-/* Status editor: per-row label input + color swatch + hex */
-.status-editor { display: flex; flex-direction: column; gap: 8px; }
-.status-row {
-  display: grid;
-  grid-template-columns: 1fr 28px 96px;
-  align-items: center;
-  gap: 8px;
-}
-.status-row input[type="text"] {
-  padding: 8px 10px;
-  font: inherit; font-size: 12px;
-  color: var(--fg-1);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  outline: none;
-}
-.status-row input[type="text"]:focus { border-color: rgba(255,255,255,0.18); }
-.status-row input[type="text"]:disabled,
-.status-row input[type="text"][readonly] {
-  color: var(--fg-3);
-  background: var(--surface-1);
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-/* Static colour swatch (replaces <input type="color">). It is purely visual:
-   clicking it does NOT open a picker — the user edits the hex field directly,
-   and the swatch updates from that. Hovering shows the hex in a tooltip. */
-.status-row .color-swatch {
-  width: 28px; height: 28px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  cursor: default;
-  flex-shrink: 0;
-  /* `background-color` is set inline from JS — the colour fills the entire
-     square edge-to-edge inside the border, no transparent gaps. */
-}
-.status-row input[type="text"].hex {
-  font-family: var(--font-mono);
-  text-align: center;
-  text-transform: uppercase;
-}
-.status-row input[type="text"].hex:focus { border-color: rgba(255,255,255,0.18); }
-
-/* Scan path & excluded list editors */
+/* Scan path & excluded list editors — both render as wrapping pill rows so
+   the two lists read as one consistent style. Scan paths keep the mono font
+   (design-system treatment for paths); excludes stay sans. */
 .path-list, .chip-edit-row {
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px;
   margin-bottom: 10px;
 }
-.chip-edit-row { flex-direction: row; flex-wrap: wrap; }
 .path-item {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 100%;
+  padding: 4px 4px 4px 10px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-2);
 }
-.path-item .remove {
-  background: transparent;
-  border: 0;
-  color: var(--fg-3);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--radius-xs);
+/* Path text — truncate with an ellipsis (full path on hover via title) so a
+   long path becomes a tidy pill instead of stretching the whole row. */
+.path-item > span:first-child {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.path-item .remove,
+.exclude-chip .remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  padding: 0; background: transparent; border: 0;
+  color: var(--fg-3); cursor: pointer;
+  border-radius: 50%;
+  flex: none;
 }
 .path-item .remove:hover { color: var(--danger); background: rgba(248,113,113,0.10); }
 .exclude-chip {
@@ -963,26 +1558,125 @@ body {
 }
 .exclude-chip .remove:hover { color: var(--danger); background: rgba(248,113,113,0.10); }
 
-/* ── Popover (card menu) ──────────────────────────────────────────────────── */
-/* Same hide-by-default pattern as .modal. */
-.popover {
-  display: none;
-  position: fixed;
-  z-index: 90;
-  min-width: 200px;
-  background: var(--surface);
+/* ── Install confirmation modal ──────────────────────────────────────────── */
+/* Shown when the user clicks Claude / Codex but the CLI is missing from PATH.
+   The `.install-cmd` block previews the exact npm command we'll run if the
+   user clicks Allow — same monospace look as inline code elsewhere. */
+.install-cmd {
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--fg-1);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── In-card menu (3-dot transforms the card body) ───────────────────────── */
+/* When .card has data-menu="open", swap the normal body sections for the
+   menu view. The header stays visible so the 3-dot toggle and folder icon
+   remain in reach, and the menu items occupy the space the body sections
+   used to take. */
+.card[data-menu="open"] > .card-row,
+.card[data-menu="open"] > .card-path-row,
+.card[data-menu="open"] > .card-actions { display: none; }
+.card[data-menu="open"] .card-menu { background: var(--surface-3); color: var(--fg-1); }
+.card-menu-view { display: none; }
+/* Grid layout — keeps the card's outer height close to its normal-mode
+   height. The hidden body sections (.card-row + .card-path-row +
+   .card-actions) take about 128px of vertical real estate; a 3-col × 2-row
+   tile grid at ~60px/tile + 6px gap fills the same envelope, so the card
+   doesn't visibly grow when the menu opens. The .popover-sep is hidden
+   because the divider doesn't translate to a grid layout. */
+.card[data-menu="open"] > .card-menu-view {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  /* flex: 1 + align-items: stretch makes the tile row consume the entire
+     vertical space the hidden body sections used to occupy. Combined with
+     the JS height-lock on .card, this means the menu fills the body area
+     with no empty space above or below the tiles. */
+  flex: 1;
+  align-items: stretch;
+  animation: card-menu-in 140ms var(--ease-out);
+}
+.card-menu-view > .popover-sep { display: none; }
+/* Menu tiles share the vendor-button visual language (background, border,
+   radius, typography) but use a vertical stack now that each tile carries
+   a description line under its label. Top row is icon + label (horizontal,
+   matches vendor-btn layout); bottom row is a smaller muted description.
+   flex: 1 makes tiles share row width equally; the parent's
+   align-items: stretch makes them fill the body area's height — together
+   that means no empty space inside or around the tile row. */
+.card-menu-view > .popover-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 12px;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 6px;
-  flex-direction: column; gap: 2px;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-lg), var(--shadow-inset);
+  color: var(--fg-1);
+  cursor: pointer;
+  letter-spacing: var(--tracking-snug);
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              color var(--dur) var(--ease-out);
 }
-.popover.is-open {
+.card-menu-view > .popover-item .menu-item-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.card-menu-view > .popover-item .menu-item-desc {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--fg-3);
+  letter-spacing: 0;
+  white-space: normal;
+  /* Reserve exactly 2 lines of vertical space AND centre the actual text
+     within that space — together these guarantee every tile has the same
+     description-area footprint, AND any phrase that happens to fit on one
+     line sits in the middle of the slot rather than top-aligned, which
+     was breaking the visual rhythm vs neighbours whose text wrapped. */
   display: flex;
-  animation: modal-in 160ms var(--ease-out);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: calc(11px * 1.3 * 2);
 }
+.card-menu-view > .popover-item svg {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-2);
+  flex-shrink: 0;
+}
+.card-menu-view > .popover-item:hover {
+  background: var(--surface-3);
+  border-color: var(--ring);
+  color: var(--fg-1);
+}
+.card-menu-view > .popover-item:hover svg { color: var(--fg-1); }
+.card-menu-view > .popover-item:hover .menu-item-desc { color: var(--fg-2); }
+@keyframes card-menu-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Menu item styling (used inside .card-menu-view) ──────────────────────── */
+/* These classes (.popover-item, .popover-sep) are legacy names from when the
+   menu lived in a floating popover — kept stable to minimise diff against the
+   items' SVGs. Now rendered inside .card-menu-view. */
 .popover-item {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px;
@@ -998,7 +1692,13 @@ body {
 .popover-item svg { color: var(--fg-3); flex-shrink: 0; }
 .popover-item:hover { background: var(--surface-3); }
 .popover-item:hover svg { color: var(--fg-1); }
-.popover-danger { color: var(--danger); }
-.popover-danger:hover { background: rgba(248,113,113,0.10); }
-.popover-danger svg { color: var(--danger); }
+/* Inset divider between routine actions and the heavier "Publish to GitHub"
+   action. Kept off the edges so it visually groups items rather than slicing
+   the menu in half. */
+.popover-sep {
+  height: 1px;
+  margin: 6px 12px;
+  background: var(--border);
+  pointer-events: none;
+}
 

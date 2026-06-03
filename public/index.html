@@ -17,20 +17,20 @@
        (the buttons, the credit link) opt out via .nodrag. -->
   <div class="titlebar drag" role="banner">
     <div class="traffic-lights nodrag" aria-label="Window controls">
-      <button class="tl tl-close" id="win-close" type="button" aria-label="Close" title="Close">
+      <button class="tl tl-close" id="win-close" type="button" aria-label="Close">
         <svg viewBox="0 0 8 8" width="6" height="6"><path d="M2 2l4 4M2 6l4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       </button>
-      <button class="tl tl-min" id="win-min" type="button" aria-label="Minimize" title="Minimize">
+      <button class="tl tl-min" id="win-min" type="button" aria-label="Minimize">
         <svg viewBox="0 0 8 8" width="6" height="6"><path d="M1.6 4h4.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       </button>
-      <button class="tl tl-max" id="win-max" type="button" aria-label="Maximize" title="Maximize">
+      <button class="tl tl-max" id="win-max" type="button" aria-label="Maximize">
         <svg class="ico-max" viewBox="0 0 8 8" width="6" height="6"><path d="M4 1.6v4.8M1.6 4h4.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         <svg class="ico-restore" viewBox="0 0 8 8" width="6" height="6" hidden><path d="M4 1.6v4.8M1.6 4h4.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       </button>
     </div>
-    <a class="titlebar-credit nodrag" href="https://x.com/cleaneramade" target="_blank" rel="noopener noreferrer" title="Open @cleaneramade on X">
+    <a class="titlebar-credit nodrag" href="https://x.com/cleaneramade" target="_blank" rel="noopener noreferrer" aria-label="Open @cleaneramade on X">
       <span>Made by @cleaneramade</span>
-      <img class="credit-mark" id="credit-mark" src="/api/logo" alt="" />
+      <img class="credit-mark" id="credit-mark" src="/api/credit-logo" alt="" />
     </a>
   </div>
 
@@ -43,7 +43,7 @@
       </div>
     </div>
 
-    <div class="kpi-row" role="group" aria-label="Project counts">
+    <div class="kpi-row" id="kpi-row" role="group" aria-label="Project counts">
       <div class="kpi" data-kind="progress">
         <span class="kpi-num" id="kpi-progress">—</span>
         <span class="kpi-label">In Progress</span>
@@ -74,11 +74,11 @@
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>Add Project</span>
       </button>
-      <button class="btn btn-secondary btn-scan" id="btn-scan" type="button" title="Scan configured folders for new projects">
+      <button class="btn btn-secondary btn-scan" id="btn-scan" type="button" aria-label="Scan configured folders for new projects">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
         <span>Scan</span>
       </button>
-      <button class="btn btn-secondary btn-settings" id="btn-settings" type="button" title="Settings">
+      <button class="btn btn-secondary btn-settings" id="btn-settings" type="button" aria-label="Settings">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 4.4l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
         <span>Settings</span>
       </button>
@@ -107,13 +107,24 @@
         </button>
       </header>
       <div class="modal-body">
-        <p class="modal-help">Pick a folder or paste its full path. Coding Drives will auto-detect the stack and indicators.</p>
-        <div class="modal-input-row">
-          <input id="add-path" type="text" placeholder="C:\path\to\projects" autocomplete="off" />
-          <button class="btn btn-secondary" id="add-pick" type="button">Browse</button>
-          <button class="btn btn-brand" id="add-submit" type="button">Add</button>
+        <!-- Unified smart field: one input handles both cases. The server
+             inspects the path as you type — if the folder exists it's
+             connected, if it doesn't it's created — and the primary button
+             label flips to "Connect project" / "Create project" to match. -->
+        <div class="add-pane">
+          <p class="modal-help">Connect a folder that already exists, or pick a location and add a name to create a new one.</p>
+          <div class="add-field">
+            <label class="gh-label" for="add-path">Project folder</label>
+            <div class="modal-input-row">
+              <input id="add-path" type="text" placeholder="Name your project — or paste a folder path" autocomplete="off" />
+              <button class="btn btn-secondary" id="add-pick" type="button">Browse</button>
+            </div>
+            <div class="add-quick" id="add-quick" hidden></div>
+          </div>
+          <div class="add-status" id="add-status" hidden></div>
+          <div class="modal-error" id="add-error"></div>
+          <button class="btn btn-brand add-submit-btn" id="add-submit" type="button" disabled>Add project</button>
         </div>
-        <div class="modal-error" id="add-error"></div>
       </div>
     </div>
   </div>
@@ -131,36 +142,10 @@
 
       <div class="modal-body settings-body">
 
-        <!-- Backup destination -->
-        <section class="settings-section">
-          <h3 class="settings-title">Backup destination</h3>
-          <p class="settings-help">
-            Default folder where new project backups are stored. Each project keeps a memory of where it was last
-            backed up — re-running Backup updates that same folder rather than creating a duplicate.
-          </p>
-          <div class="modal-input-row">
-            <div class="input-with-paste">
-              <input id="set-backup-path" type="text" placeholder="C:\path\to\backups (browse or paste)" autocomplete="off" readonly />
-              <button class="paste-icon-btn" id="set-backup-paste" type="button" title="Paste from clipboard" aria-label="Paste from clipboard">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
-              </button>
-            </div>
-            <button class="btn btn-secondary" id="set-backup-pick" type="button">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-              <span>Browse</span>
-            </button>
-          </div>
-        </section>
-
         <!-- Application logo -->
         <section class="settings-section">
           <h3 class="settings-title">App logo</h3>
-          <p class="settings-help">
-            Replaces the brand mark in the header and the running window/taskbar icon — Coding Drives
-            <strong>restarts automatically</strong> so the new icon is applied everywhere it's loaded.
-            Recommended: 256×256 square <strong>PNG</strong> or <strong>ICO</strong> (transparent background);
-            JPG / WEBP also work, and SVG updates the in-app header only.
-          </p>
+          <p class="settings-help">Upload a PNG, ICO, JPG, or SVG to change the app logo. (256×256 recommended.)</p>
           <div class="logo-row">
             <img class="logo-preview" id="set-logo-preview" src="/api/logo" alt="" />
             <div class="logo-actions">
@@ -170,13 +155,51 @@
           </div>
         </section>
 
-        <!-- Status customization -->
+        <!-- Preferences — card display + coding tools, grouped under one label -->
         <section class="settings-section">
-          <h3 class="settings-title">Statuses</h3>
-          <p class="settings-help">
-            Rename a status or pick a custom hex color. Color applies to status pills, filter chips, and KPIs.
-          </p>
-          <div id="set-statuses" class="status-editor"></div>
+          <h3 class="settings-title">Preferences</h3>
+          <div class="settings-toggle-group">
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-label">
+                <span class="settings-toggle-title">Show tech badges</span>
+                <p class="settings-help">Show the framework chip and integration indicators (GIT, VERCEL, ENV).</p>
+              </div>
+              <span class="switch">
+                <input type="checkbox" id="set-show-stack" aria-label="Show tech badges" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </span>
+            </div>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-label">
+                <span class="settings-toggle-title">Show language badges</span>
+                <p class="settings-help">Show the per-language color chips (TypeScript, CSS, etc.).</p>
+              </div>
+              <span class="switch">
+                <input type="checkbox" id="set-show-langs" aria-label="Show language badges" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </span>
+            </div>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-label">
+                <span class="settings-toggle-title">Open Claude in the desktop app</span>
+                <p class="settings-help">Open projects in the Claude desktop app instead of a terminal.</p>
+              </div>
+              <span class="switch">
+                <input type="checkbox" id="set-claude-desktop" aria-label="Open Claude in the desktop app" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </span>
+            </div>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-label">
+                <span class="settings-toggle-title">Open Codex in the desktop app</span>
+                <p class="settings-help">Open projects in the Codex desktop app instead of a terminal.</p>
+              </div>
+              <span class="switch">
+                <input type="checkbox" id="set-codex-desktop" aria-label="Open Codex in the desktop app" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </span>
+            </div>
+          </div>
         </section>
 
         <!-- Scan paths -->
@@ -202,10 +225,30 @@
           <div class="modal-input-row">
             <input id="set-exclude-add" type="text" placeholder="Folder name (e.g., Archive)" autocomplete="off" />
             <button class="btn btn-secondary" id="set-exclude-pick" type="button">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
               <span>Browse</span>
             </button>
             <button class="btn btn-brand" id="set-exclude-confirm" type="button">Add</button>
+          </div>
+        </section>
+
+        <!-- Backup destination (last because it's a one-time setup that
+             rarely needs revisiting after the first launch). -->
+        <section class="settings-section">
+          <h3 class="settings-title">Backup destination</h3>
+          <p class="settings-help">
+            Default folder where new project backups are stored. Each project keeps a memory of where it was last
+            backed up — re-running Backup updates that same folder rather than creating a duplicate.
+          </p>
+          <div class="modal-input-row">
+            <div class="input-with-paste">
+              <input id="set-backup-path" type="text" placeholder="C:\path\to\backups (browse or paste)" autocomplete="off" readonly />
+              <button class="paste-icon-btn" id="set-backup-paste" type="button" aria-label="Paste from clipboard">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
+              </button>
+            </div>
+            <button class="btn btn-secondary" id="set-backup-pick" type="button">
+              <span>Browse</span>
+            </button>
           </div>
         </section>
 
@@ -221,34 +264,186 @@
     </div>
   </div>
 
-  <!-- ── Publish to GitHub modal ───────────────────────────────────────── -->
-  <div class="modal" id="modal-github" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-github-title">
+  <!-- ── Publish to GitHub modal — two-step wizard ──────────────────────── -->
+  <!-- Step 1: pick a method (AI vs Manual) + visibility + repo name.
+       Step 2a: AI flow — pick a CLI, then launch the prefilled prompt.
+       Step 2b: Manual flow — existing robocopy + gh repo create pipeline.
+       JS toggles which step <section> is hidden; only one is visible at a
+       time. The footer has parallel button groups, one per step. -->
+  <div class="modal modal-lg" id="modal-github" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-github-title">
     <div class="modal-backdrop"></div>
     <div class="modal-card">
       <header class="modal-head">
         <h2 id="modal-github-title">Publish to GitHub</h2>
+        <div class="modal-head-aux">
+          <!-- Slide segmented control: thumb slides between halves; the
+               active half gets the violet highlight. Updated via the
+               .gh-vis-opt click handler in app.js. Hidden on Steps 2a/2b
+               where the visibility choice has already been committed.
+               Also hidden in re-publish modes — the repo's visibility
+               on github.com is the source of truth and we don't change
+               it. -->
+          <div class="gh-vis-segment" id="gh-vis-segment" data-active="public" role="radiogroup" aria-label="Visibility">
+            <span class="gh-vis-thumb" aria-hidden="true"></span>
+            <button type="button" class="gh-vis-opt" data-value="public"  aria-pressed="true">Public</button>
+            <button type="button" class="gh-vis-opt" data-value="private" aria-pressed="false">Private</button>
+          </div>
+          <!-- Re-publish only: pick whether this round is just an
+               overwrite (no new release tag) or a tagged new release.
+               Same slide-segment styling as the visibility control. -->
+          <div class="gh-vis-segment" id="gh-mode-segment" data-active="release" role="radiogroup" aria-label="Release mode" hidden>
+            <span class="gh-vis-thumb" aria-hidden="true"></span>
+            <button type="button" class="gh-vis-opt" data-value="overwrite" aria-pressed="false">Overwrite</button>
+            <button type="button" class="gh-vis-opt" data-value="release"   aria-pressed="true">New release</button>
+          </div>
+          <button class="modal-confirm" id="gh-confirm" type="button" disabled>Continue</button>
+          <button class="icon-btn modal-close" aria-label="Close" type="button">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="modal-body">
+
+        <!-- ── Step 1: method + visibility + repo name ──────────────── -->
+        <section class="gh-step-pane" id="gh-step-method">
+          <label class="gh-field">
+            <span class="gh-field-label">Repo name</span>
+            <input id="gh-repo-name" type="text" autocomplete="off" />
+          </label>
+
+          <!-- Re-publish + manual + new-release only. AI flow figures the
+               version out from package.json (or the right file for the
+               stack); the manual flow needs the user to type one. -->
+          <label class="gh-field" id="gh-version-field" hidden>
+            <span class="gh-field-label">Version <span class="gh-field-hint">(e.g., 1.2.3)</span></span>
+            <input id="gh-version" type="text" placeholder="1.0.1" autocomplete="off" />
+          </label>
+
+          <div class="gh-method-grid" role="radiogroup" aria-label="Publish method">
+            <button class="gh-method-card" type="button" data-method="ai" role="radio" aria-checked="false">
+              <div class="gh-method-icon" aria-hidden="true">
+                <!-- Sparkle / starburst — abstract "AI" symbol. Same size + stroke as the backup modal icons. -->
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+              </div>
+              <div class="gh-method-title">AI-assisted</div>
+              <div class="gh-method-sub">Claude or Codex writes your README and project files, then publishes to GitHub.</div>
+              <div class="gh-method-tag">Recommended</div>
+            </button>
+            <button class="gh-method-card" type="button" data-method="manual" role="radio" aria-checked="false">
+              <div class="gh-method-icon" aria-hidden="true">
+                <!-- Window/grid — abstract "manual" symbol. -->
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+              </div>
+              <div class="gh-method-title">Manual</div>
+              <div class="gh-method-sub">Publishes your project with a built-in README and .gitignore template.</div>
+              <div class="gh-method-tag">Quick</div>
+            </button>
+          </div>
+
+        </section>
+
+        <!-- ── Step 2a: AI CLI choice ───────────────────────────────── -->
+        <section class="gh-step-pane" id="gh-step-ai" hidden>
+          <p class="gh-step-help">Pick where to open the prefilled prompt:</p>
+          <div class="gh-cli-grid" role="radiogroup" aria-label="CLI">
+            <button class="gh-cli-card" type="button" data-cli="claude" role="radio" aria-checked="false">
+              <div class="gh-cli-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2 4 7v10l8 5 8-5V7l-8-5zm0 2.18 6 3.75L12 11.7 6 7.93l6-3.75zM6 9.75l6 3.75v6L6 15.75v-6zm12 0v6l-6 3.75v-6l6-3.75z"/></svg>
+              </div>
+              <div class="gh-cli-title">Claude Code</div>
+            </button>
+            <button class="gh-cli-card" type="button" data-cli="codex" role="radio" aria-checked="false">
+              <div class="gh-cli-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l-3 3 3 3M15 9l3 3-3 3"/></svg>
+              </div>
+              <div class="gh-cli-title">Codex</div>
+            </button>
+          </div>
+          <p class="gh-step-summary" id="gh-ai-summary"></p>
+        </section>
+
+        <!-- ── Step 2b: Manual flow ─────────────────────────────────── -->
+        <section class="gh-step-pane" id="gh-step-manual" hidden>
+          <div id="gh-prior" hidden></div>
+          <div class="gh-summary" id="gh-summary"></div>
+          <div class="gh-progress" id="gh-progress" hidden>
+            <ol class="gh-steps" id="gh-steps"></ol>
+          </div>
+          <div class="modal-error" id="gh-error"></div>
+          <input id="gh-dest" type="hidden" />
+        </section>
+
+      </div>
+
+      <!-- Per-step button groups. JS toggles `hidden` on each row to match
+           the active step. Only one row is visible at any time. -->
+      <!-- Per-step button groups. JS toggles `hidden` on each row to match
+           the active step. The primary brand CTA (Continue / Open in CLI /
+           Open on GitHub) is the header's #gh-confirm icon button instead
+           of a footer button — kept here as hidden mirrors so the existing
+           wizard logic that calls .click() / .disabled = ... on them still
+           works unchanged. The header confirm icon proxies through to
+           whichever of these is currently relevant. -->
+      <footer class="modal-foot">
+        <div class="modal-foot-row" id="gh-foot-method">
+          <div class="grow"></div>
+          <button class="btn btn-brand" id="gh-method-next" type="button" disabled hidden>Continue</button>
+        </div>
+        <div class="modal-foot-row" id="gh-foot-ai" hidden>
+          <div class="grow"></div>
+          <button class="btn btn-ghost" id="gh-ai-back" type="button">Back</button>
+          <button class="btn btn-brand" id="gh-ai-launch" type="button" disabled hidden>Open in CLI</button>
+        </div>
+        <div class="modal-foot-row" id="gh-foot-manual" hidden>
+          <span class="gh-status" id="gh-status"></span>
+          <div class="grow"></div>
+          <button class="btn btn-ghost" id="gh-manual-back" type="button">Back</button>
+          <button class="btn btn-brand" id="gh-submit" type="button" hidden>Open on GitHub</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ── Publish New Release modal ──────────────────────────────────────── -->
+  <!-- Shown when the popover's "Publish New Release" item is clicked
+       (only present once a project has a github.com origin). Submits to
+       POST /api/projects/:slug/github/release which runs `gh release create`. -->
+  <div class="modal" id="modal-release" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-release-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-release-title">Publish New Release</h2>
         <button class="icon-btn modal-close" aria-label="Close" type="button">
           <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
         </button>
       </header>
-      <div class="modal-body" id="gh-body">
-        <div id="gh-prior" hidden></div>
-
-        <div class="gh-summary" id="gh-summary"></div>
-
-        <div class="gh-progress" id="gh-progress" hidden>
-          <ol class="gh-steps" id="gh-steps"></ol>
-        </div>
-
-        <div class="modal-error" id="gh-error"></div>
-
-        <input id="gh-repo-name" type="hidden" />
-        <input id="gh-dest" type="hidden" />
+      <div class="modal-body">
+        <p class="modal-help" id="rel-target"></p>
+        <label class="gh-field">
+          <span class="gh-field-label">Tag</span>
+          <input id="rel-tag" type="text" placeholder="v1.0.1" autocomplete="off" />
+        </label>
+        <label class="gh-field">
+          <span class="gh-field-label">Title <span class="gh-field-hint">(optional)</span></span>
+          <input id="rel-title" type="text" placeholder="Defaults to tag" autocomplete="off" />
+        </label>
+        <label class="gh-checkbox">
+          <input type="checkbox" id="rel-auto" checked />
+          <span>Auto-generate notes from commits</span>
+        </label>
+        <label class="gh-field" id="rel-notes-wrap" hidden>
+          <span class="gh-field-label">Release notes</span>
+          <textarea id="rel-notes" rows="6" placeholder="Markdown supported"></textarea>
+        </label>
+        <div class="modal-error" id="rel-error"></div>
       </div>
-      <footer class="modal-foot" id="gh-foot" hidden>
-        <span class="gh-status" id="gh-status"></span>
-        <div class="grow"></div>
-        <button class="btn btn-brand" id="gh-submit" type="button" hidden>Open on GitHub</button>
+      <footer class="modal-foot">
+        <div class="modal-foot-row">
+          <div class="grow"></div>
+          <button class="btn btn-ghost modal-close" type="button">Cancel</button>
+          <button class="btn btn-brand" id="rel-submit" type="button">Create release</button>
+        </div>
       </footer>
     </div>
   </div>
@@ -260,10 +455,10 @@
         <div class="card-title-row">
           <h2 class="card-title"></h2>
           <div class="card-title-actions">
-            <button class="icon-btn explorer" title="Open in File Explorer" aria-label="Open in File Explorer" type="button">
-              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <button class="icon-btn explorer" aria-label="Open in File Explorer" type="button">
+              <svg class="ic-folder" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
             </button>
-            <button class="icon-btn card-menu" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false" type="button">
+            <button class="icon-btn card-menu" aria-label="More" aria-haspopup="menu" aria-expanded="false" type="button">
               <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></svg>
             </button>
           </div>
@@ -280,21 +475,28 @@
       </div>
 
       <div class="card-path-row">
-        <div class="card-path" title=""></div>
-        <span class="last-backup" hidden></span>
+        <div class="card-path">
+          <span class="card-path-text"></span>
+          <button class="card-path-copy" type="button" aria-label="Copy path to clipboard">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="card-row card-row-langs" hidden>
+        <div class="languages"></div>
       </div>
 
       <footer class="card-actions">
-        <button class="btn vendor-btn vendor-vscode action-vscode" data-tool="vscode" type="button" title="Open in VS Code">
+        <button class="btn vendor-btn vendor-vscode action-vscode" data-tool="vscode" type="button">
           <span class="vendor-mark" aria-hidden="true">
-            <!-- Official VS Code logo silhouette (Microsoft). currentColor keeps it crisp on the blue. -->
             <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
               <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4608 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4609 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0415L12.1872 25.0096C10.589 23.7965 8.35363 23.8959 6.86933 25.2461L1.36303 30.2549C-0.452552 31.9064 -0.454633 34.7627 1.35853 36.417L16.2471 50.0001L1.35853 63.5832C-0.454633 65.2374 -0.452552 68.0938 1.36303 69.7453L6.86933 74.7541C8.35363 76.1043 10.589 76.2037 12.1872 74.9905L29.3551 61.9587L68.769 97.9167C69.3925 98.5406 70.1246 99.0104 70.8511 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z"/>
             </svg>
           </span>
           <span class="vendor-label">VS Code</span>
         </button>
-        <button class="btn vendor-btn vendor-claude action-claude" data-tool="claude" type="button" title="Open Claude Code in this project">
+        <button class="btn vendor-btn vendor-claude action-claude" data-tool="claude" type="button">
           <span class="vendor-mark" aria-hidden="true">
             <!-- Official Claude Code mark (Anthropic). -->
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
@@ -303,7 +505,7 @@
           </span>
           <span class="vendor-label">Claude Code</span>
         </button>
-        <button class="btn vendor-btn vendor-codex action-codex" data-tool="codex" type="button" title="Open Codex in this project">
+        <button class="btn vendor-btn vendor-codex action-codex" data-tool="codex" type="button">
           <span class="vendor-mark" aria-hidden="true">
             <!-- Official OpenAI / ChatGPT mark. -->
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true">
@@ -314,36 +516,143 @@
         </button>
       </footer>
 
+      <!-- In-card menu view: when the 3-dot button is clicked the body
+           sections above (.card-row, .card-path-row, .card-actions) are hidden
+           via .card[data-menu="open"] selectors, and this container is
+           populated with the same items that used to live in the standalone
+           popover. Clicking ⋮ again toggles back to the normal view.
+           Visibility is controlled purely by .card[data-menu="open"]
+           selectors — see app.css. -->
+      <div class="card-menu-view" role="menu"></div>
+
     </article>
   </template>
 
-  <!-- ── Card menu (popover) ───────────────────────────────────────────── -->
-  <div class="popover" id="card-popover" style="display:none" role="menu">
+  <!-- ── Backup confirmation modal ──────────────────────────────────────
+       Opened when "Backup" is picked from a card's 3-dot menu. Same two-card
+       method-picker visual language as the Publish to GitHub modal. The
+       "Replace current" card is auto-disabled when the project has no
+       lastBackedUpAt timestamp — there's nothing to replace yet. -->
+  <div class="modal modal-lg" id="modal-backup" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-backup-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-backup-title">Backup</h2>
+        <div class="modal-head-aux">
+          <button class="modal-confirm" id="backup-confirm" type="button" disabled>Back up</button>
+          <button class="icon-btn modal-close" aria-label="Close" type="button">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="modal-body">
+        <label class="gh-field">
+          <span class="gh-field-label">Folder name <span class="gh-field-hint">(under your backups path)</span></span>
+          <input id="backup-folder-name" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="gh-method-grid" role="radiogroup" aria-label="Backup method">
+          <button class="gh-method-card" type="button" data-mode="replace" role="radio" aria-checked="false">
+            <div class="gh-method-icon" aria-hidden="true">
+              <!-- Cycle / refresh — abstract "update existing" symbol, same
+                   register as the github modal's sparkle / grid icons so the
+                   two pop-ups read with one visual language. -->
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+            </div>
+            <div class="gh-method-title">Replace current</div>
+            <div class="gh-method-sub" id="backup-replace-sub">Overwrite the existing backup folder.</div>
+            <div class="gh-method-tag">Routine</div>
+          </button>
+          <button class="gh-method-card" type="button" data-mode="new" role="radio" aria-checked="false">
+            <div class="gh-method-icon" aria-hidden="true">
+              <!-- Plus inside a circle — abstract "create fresh" symbol. -->
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+            </div>
+            <div class="gh-method-title">Create new</div>
+            <div class="gh-method-sub">Timestamped backup — keeps history.</div>
+            <div class="gh-method-tag">History</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Install confirmation modal ─────────────────────────────────────
+       Shown when a user clicks Claude/Codex on a card but the CLI isn't on
+       PATH. Server side returns {notInstalled: true, ...}; frontend opens
+       this modal so the user can opt in to the install rather than having
+       Windows hijack with its own "install from Store" prompt. -->
+  <div class="modal" id="modal-install" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-install-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-install-title">Install required</h2>
+        <button class="icon-btn modal-close" aria-label="Close" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+        </button>
+      </header>
+      <div class="modal-body">
+        <p class="modal-help" id="install-text"></p>
+        <pre class="install-cmd" id="install-cmd"></pre>
+        <p class="modal-help">A terminal window will open so you can see the install progress. Re-open the project once the install completes.</p>
+      </div>
+      <footer class="modal-foot">
+        <div class="modal-foot-row">
+          <div class="grow"></div>
+          <button class="btn btn-ghost modal-close" type="button">Cancel</button>
+          <button class="btn btn-brand" id="install-allow" type="button">Allow &amp; install</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ── Card menu (in-card) ─────────────────────────────────────────────
+       The 3-dot button on each card transforms the card body into this list
+       of options (see .card[data-menu="open"] rules in app.css). The items
+       below are cloned into .card-menu-view by populateCardMenu() in app.js.
+
+       Order: routine project actions first (Backup / Archive / Copy path),
+       a visual divider, then the heavier "publishes to the world" action. -->
+  <template id="card-menu-template">
     <button class="popover-item" data-action="backup" role="menuitem" type="button">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>
-      <span>Backup now</span>
-    </button>
-    <button class="popover-item" data-action="publish-github" role="menuitem" type="button">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.11.79-.25.79-.56v-2.04c-3.2.7-3.88-1.37-3.88-1.37-.52-1.34-1.27-1.7-1.27-1.7-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.24 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.16 1.18a10.94 10.94 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
-      <span>Publish to GitHub</span>
+      <span class="menu-item-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+        <span>Backup</span>
+      </span>
+      <span class="menu-item-desc">Mirror folder to backups</span><!-- ~24 chars, wraps to 2 -->
     </button>
     <button class="popover-item" data-action="archive" role="menuitem" type="button">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M9 11h6"/></svg>
-      <span>Archive (hide)</span>
+      <span class="menu-item-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg>
+        <span>Archive</span>
+      </span>
+      <span class="menu-item-desc">Hide from default project list</span>
     </button>
     <button class="popover-item" data-action="unarchive" role="menuitem" type="button">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M9 14l3-3 3 3M12 11v7"/></svg>
-      <span>Unarchive</span>
+      <span class="menu-item-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M9 14l3-3 3 3M12 11v7"/></svg>
+        <span>Unarchive</span>
+      </span>
+      <span class="menu-item-desc">Move back to in-progress list</span>
     </button>
-    <button class="popover-item" data-action="copy-path" role="menuitem" type="button">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
-      <span>Copy path</span>
+    <div class="popover-sep" role="separator" aria-hidden="true"></div>
+    <!-- Label + description flip between "Publish" and "New Release" based
+         on whether the project already has a github.com remote — set in
+         populateCardMenu in app.js. -->
+    <button class="popover-item" data-action="publish-github" role="menuitem" type="button">
+      <span class="menu-item-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.11.79-.25.79-.56v-2.04c-3.2.7-3.88-1.37-3.88-1.37-.52-1.34-1.27-1.7-1.27-1.7-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.24 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.16 1.18a10.94 10.94 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+        <span class="publish-label">Publish</span>
+      </span>
+      <span class="menu-item-desc publish-desc">Push to a new GitHub repo</span>
     </button>
-    <button class="popover-item popover-danger" data-action="untrack" role="menuitem" type="button">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13M9 7V4h6v3"/></svg>
-      <span>Untrack (manual only)</span>
+    <button class="popover-item" data-action="visit-github" role="menuitem" type="button" hidden>
+      <span class="menu-item-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-4"/></svg>
+        <span>Visit</span>
+      </span>
+      <span class="menu-item-desc">Open the repo in your browser</span>
     </button>
-  </div>
+  </template>
 
   <script src="/app.js" type="module"></script>
 </body>

@@ -22,7 +22,7 @@ const PRELOAD_PATH = path.join(ROOT, "preload.cjs");
 
 // Resolve the icon to use for BrowserWindow at boot. If the user has uploaded
 // a custom logo (via Settings → App logo), and it's a raster format that
-// Electron can use as a window icon (PNG/JPG/WEBP/ICO), we use that path.
+// Electron can use as a window icon (PNG/JPG/ICO), we use that path.
 // SVG is intentionally rejected here — Electron can't render SVG to a window
 // icon on Windows. The bundled .ico is the fallback.
 function resolveWindowIconPath(userDataDir) {
@@ -33,7 +33,7 @@ function resolveWindowIconPath(userDataDir) {
     const custom = u.customLogo;
     if (custom && fs.existsSync(custom)) {
       const ext = path.extname(custom).toLowerCase();
-      if ([".png", ".jpg", ".jpeg", ".webp", ".ico"].includes(ext)) return custom;
+      if ([".png", ".jpg", ".jpeg", ".ico"].includes(ext)) return custom;
     }
   } catch {}
   return ICON_PATH;
@@ -85,6 +85,7 @@ function createWindow() {
     title: "Coding Drives",
     autoHideMenuBar: true,
     frame: false,                 // Frameless — we render our own controls (Apple-like blend)
+    show: false,                  // Hidden until maximized to avoid a default-size flash
     icon: fs.existsSync(windowIcon) ? windowIcon : undefined,
     webPreferences: {
       contextIsolation: true,
@@ -94,7 +95,33 @@ function createWindow() {
     },
   });
 
+  // Launch maximized (not true full-screen) so the Windows taskbar stays
+  // visible. F11-style full-screen hides the shell which the user explicitly
+  // doesn't want.
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.maximize();
+    mainWindow.show();
+  });
+
   Menu.setApplicationMenu(null);
+
+  // Manual reload shortcuts. The app runs with NO native menu (frameless custom
+  // UI), and the menu is exactly what normally registers the default Ctrl+R /
+  // F5 reload accelerators — so without this, refresh does nothing in the
+  // packaged app. We intercept the keys on the window itself instead.
+  //   Ctrl+R / F5         → reload (ignore cache, so freshly-synced public/*
+  //                         CSS/JS is always picked up, never a stale copy)
+  //   Ctrl+Shift+R        → same hard reload (familiar muscle-memory alias)
+  // meta is included alongside control so Cmd+R also works if ever run on macOS.
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    const key = (input.key || "").toLowerCase();
+    const reload = key === "f5" || ((input.control || input.meta) && key === "r");
+    if (reload) {
+      event.preventDefault();
+      mainWindow.webContents.reloadIgnoringCache();
+    }
+  });
 
   // Open external links in the user's default browser, never in-window.
   mainWindow.webContents.setWindowOpenHandler(({ url: u }) => {
@@ -102,7 +129,7 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  // Notify renderer when maximize state flips so the maximize/restore icon swaps.
+  // Notify renderer when maximize state flips so the green-button icon swaps.
   mainWindow.on("maximize",   () => mainWindow.webContents.send("window:maximize-changed", true));
   mainWindow.on("unmaximize", () => mainWindow.webContents.send("window:maximize-changed", false));
 
@@ -110,10 +137,83 @@ function createWindow() {
   global.__codingDrivesWindow = mainWindow;
 
   mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
+
+  // Dev-only live reload — watches the renderer source dirs and reloads the
+  // window on any change. `app.isPackaged` is false when running via
+  // `npm run dev` (`electron .`) and true inside the built installer, so the
+  // watcher never fires in production. fs.watch with recursive:true is
+  // supported on Windows and macOS (the target platforms for this app); we
+  // debounce so a burst of saves (editors often write multiple events per
+  // save) results in a single reload.
+  //
+  // Two reload modes:
+  //   1. Renderer-only — public/* and assets/*. Cheap webContents reload.
+  //   2. Full relaunch — server.js. The express server is loaded once at
+  //      startup via dynamic import; there's no clean way to swap it in
+  //      place, so we relaunch the whole Electron process. Same restart cost
+  //      the user would pay manually, just automatic.
+  if (!app.isPackaged) {
+    const rendererWatchDirs = [
+      path.join(ROOT, "public"),
+      path.join(ROOT, "assets"),
+    ].filter((p) => fs.existsSync(p));
+
+    const SERVER_FILE = path.join(ROOT, "server.js");
+
+    let reloadTimer = null;
+    let relaunchTimer = null;
+    let relaunching = false;
+
+    const scheduleReload = (reason) => {
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        log("[dev] reloading window:", reason);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.reloadIgnoringCache();
+        }
+      }, 150);
+    };
+
+    const scheduleRelaunch = (reason) => {
+      if (relaunching) return;
+      clearTimeout(relaunchTimer);
+      // Longer debounce than the renderer path — editors sometimes touch a
+      // file twice and we don't want two app.relaunch() calls racing.
+      relaunchTimer = setTimeout(() => {
+        relaunching = true;
+        log("[dev] relaunching app:", reason);
+        app.relaunch();
+        app.exit(0);
+      }, 350);
+    };
+
+    for (const dir of rendererWatchDirs) {
+      try {
+        fs.watch(dir, { recursive: true }, (_event, filename) => {
+          if (!filename) return;
+          // Ignore editor swap/temp files so half-written saves don't trigger.
+          if (/(^|[\\/])\.|~$|\.swp$|\.tmp$/.test(filename)) return;
+          scheduleReload(`${dir}/${filename}`);
+        });
+        log("[dev] watching", dir);
+      } catch (err) {
+        log("[dev] watch failed for", dir, "—", err.message);
+      }
+    }
+
+    try {
+      fs.watch(SERVER_FILE, (_event) => scheduleRelaunch("server.js"));
+      log("[dev] watching", SERVER_FILE, "(triggers full relaunch)");
+    } catch (err) {
+      log("[dev] watch failed for", SERVER_FILE, "—", err.message);
+    }
+  }
 }
 
 // Window control IPC handlers (paired with preload.cjs).
 ipcMain.on("window:minimize", () => mainWindow?.minimize());
+// Green button — toggles maximize. Plain maximize (not full-screen) so the
+// Windows taskbar always remains visible.
 ipcMain.on("window:maximize", () => {
   if (!mainWindow) return;
   if (mainWindow.isMaximized()) mainWindow.unmaximize();
