@@ -6,6 +6,10 @@ See every coding project on your PC in one dashboard. Open them in VS Code, Clau
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-6a4dff.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-1.4.0-1f1f23.svg) [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6.svg)](#) [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
 
+<br>
+
+<img src="docs/dashboard.png" alt="Coding Drives dashboard — every project on your PC in one view" width="860">
+
 </div>
 
 ---
