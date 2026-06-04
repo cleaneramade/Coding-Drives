@@ -199,6 +199,17 @@
                 <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
               </span>
             </div>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-label">
+                <span class="settings-toggle-title">Send tasks with</span>
+                <p class="settings-help">Which coding agent the task send buttons launch.</p>
+              </div>
+              <div class="gh-vis-segment task-agent-segment" id="set-task-agent" data-active="claude" role="radiogroup" aria-label="Task agent">
+                <span class="gh-vis-thumb" aria-hidden="true"></span>
+                <button type="button" class="gh-vis-opt" data-value="claude" aria-pressed="true">Claude</button>
+                <button type="button" class="gh-vis-opt" data-value="codex" aria-pressed="false">Codex</button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -455,6 +466,9 @@
         <div class="card-title-row">
           <h2 class="card-title"></h2>
           <div class="card-title-actions">
+            <button class="icon-btn task-toggle" aria-label="Show tasks" aria-pressed="false" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7 2 2 4-4"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>
+            </button>
             <button class="icon-btn explorer" aria-label="Open in File Explorer" type="button">
               <svg class="ic-folder" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
             </button>
@@ -478,13 +492,40 @@
         <div class="card-path">
           <span class="card-path-text"></span>
           <button class="card-path-copy" type="button" aria-label="Copy path to clipboard">
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            <!-- Lucide "copy" — fills the 24px viewBox like the trash/send
+                 glyphs do, with softly rounded corners to match. -->
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
           </button>
         </div>
       </div>
 
       <div class="card-row card-row-langs" hidden>
         <div class="languages"></div>
+      </div>
+
+      <!-- Per-project tasks. Rows are built in renderTasks() (app.js): a
+           status mark (click toggles complete), the title (click opens the
+           editor modal), and a send button that launches Claude/Codex in a
+           terminal at the project path with the task injected as the prompt.
+           "Send all" queues every open task into one session. -->
+      <div class="card-tasks">
+        <div class="card-tasks-head">
+          <span class="label">Tasks</span>
+          <span class="task-count" hidden></span>
+          <button class="task-send-all" type="button" hidden>
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            <span>Send all</span>
+          </button>
+        </div>
+        <ul class="task-list" role="list"></ul>
+        <button class="task-more" type="button" hidden></button>
+        <div class="task-add">
+          <button class="task-add-btn" type="button">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Add task</span>
+          </button>
+          <input class="task-add-input" type="text" placeholder="Describe the task…" maxlength="200" autocomplete="off" spellcheck="false" hidden />
+        </div>
       </div>
 
       <footer class="card-actions">
@@ -605,6 +646,41 @@
     </div>
   </div>
 
+  <!-- ── Task editor modal ──────────────────────────────────────────────
+       Opened by clicking a task's title on a card. Title + the longer prompt
+       note that gets injected alongside it when the task is sent, plus a
+       manual status override (agents occasionally forget to report back). -->
+  <div class="modal" id="modal-task" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-task-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-task-title">Edit task</h2>
+        <button class="icon-btn modal-close" aria-label="Close" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+        </button>
+      </header>
+      <div class="modal-body">
+        <label class="gh-field">
+          <span class="gh-field-label">Task</span>
+          <input id="task-edit-title" type="text" maxlength="200" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="gh-field">
+          <span class="gh-field-label">Description <span class="gh-field-hint">(sent to the agent with the task)</span></span>
+          <textarea id="task-edit-note" maxlength="2000" placeholder="What to consider, what you're looking for, how you want it done…"></textarea>
+        </label>
+        <p class="modal-help task-edit-report" id="task-edit-report" hidden></p>
+      </div>
+      <footer class="modal-foot">
+        <div class="modal-foot-row">
+          <button class="btn btn-ghost task-edit-delete" id="task-edit-delete" type="button">Delete</button>
+          <div class="grow"></div>
+          <button class="btn btn-ghost modal-close" type="button">Cancel</button>
+          <button class="btn btn-brand" id="task-edit-save" type="button">Save</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <!-- ── Card menu (in-card) ─────────────────────────────────────────────
        The 3-dot button on each card transforms the card body into this list
        of options (see .card[data-menu="open"] rules in app.css). The items
@@ -644,13 +720,6 @@
         <span class="publish-label">Publish</span>
       </span>
       <span class="menu-item-desc publish-desc">Push to a new GitHub repo</span>
-    </button>
-    <button class="popover-item" data-action="visit-github" role="menuitem" type="button" hidden>
-      <span class="menu-item-head">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-4"/></svg>
-        <span>Visit</span>
-      </span>
-      <span class="menu-item-desc">Open the repo in your browser</span>
     </button>
   </template>
 

@@ -4,7 +4,7 @@
 
 See every coding project on your PC in one dashboard. Open them in VS Code, Claude Code, or Codex, back them up safely, and publish to GitHub — all from one app.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-6a4dff.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-1.4.0-1f1f23.svg) [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6.svg)](#) [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-6a4dff.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-1.5.0-1f1f23.svg) [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6.svg)](#) [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
 
 <br>
 
@@ -21,6 +21,7 @@ Point Coding Drives at the folder where you keep your projects. Every subfolder 
 From any card you can:
 
 - **Open** the project in VS Code, File Explorer, or Claude Code / Codex — terminal *or* desktop app, your choice
+- **Queue up tasks** and send them straight to Claude Code or Codex — the agent works autonomously and reports back, and the task checks itself off
 - **Back it up** safely to a folder you choose
 - **Publish it to GitHub** as a polished public repo — or hand the whole publish to Claude Code / Codex and let it do the work
 
@@ -30,6 +31,10 @@ Everything runs on your computer. No accounts. No telemetry. No cloud sync.
 
 ## Features
 
+- **Tasks on every project** — keep a checklist per card: quick-add, drag to reorder, descriptions, delete with undo
+- **Send tasks to AI** — one click opens Claude Code or Codex in the project folder with the task injected; the agent works hands-free and reports back, flipping the task to ✓ done or ✕ failed on its own (pick your agent in Settings)
+- **Live task status** — a blinking ring while the agent works (orange for Claude, white for Codex), with automatic recovery if a session dies
+- **Rearrange everything by hand** — drag cards into your own order, phone-home-screen style; every filter page remembers its own arrangement and new projects land on top
 - **Add or create projects** — name a new one (created in your scan folder) or connect an existing folder, from one smart field
 - **Auto-detects each project's stack** — Next.js, React, Node, Python, Rust, Flutter, Go, Astro, Vite, and more
 - **Language and tech badges** on every card — language mix, framework, and Git / Vercel / env indicators (toggle on/off in Settings)
@@ -65,11 +70,17 @@ npm run dev
 The grid will be empty. Open **Settings** (top-right) and:
 
 1. **Scan folders** — add the root folder where your projects live (e.g. `C:\Users\you\Documents\Code`). Every subfolder becomes a card.
-2. **Preferences** *(optional)* — toggle language/tech badges, and choose whether the Claude/Codex buttons open a terminal or the desktop app.
+2. **Preferences** *(optional)* — toggle language/tech badges, choose whether the Claude/Codex buttons open a terminal or the desktop app, and pick which agent task sends launch.
 3. **Backup destination** *(optional)* — pick where backups should go. Defaults to `Documents\Coding Drives Backups` if you leave it blank.
 4. **App logo** *(optional)* — upload your own logo (PNG, ICO, JPG, or SVG) to replace the brand mark.
 
 That's it. Coding Drives rescans whenever the window regains focus, so dropping a new folder into your scan root immediately surfaces it as a card.
+
+## Tasks → AI
+
+Click the checklist icon on any card to open its task list. Add a task, optionally give it a description (what to consider, how you want it done), and hit the **send** arrow — a terminal opens in that project with Claude Code or Codex already working on it, permissions pre-granted so it runs hands-free.
+
+The agent checks in when it starts and reports back when it's done, so the task's ring blinks while it works and flips to **done** or **failed** (with the reason) on its own. **Send all** queues every open task into a single session, worked in the order you've arranged them. If a session dies or never starts, the task marks itself failed instead of spinning forever — resend it with one click.
 
 ## Publishing to GitHub
 
@@ -91,7 +102,7 @@ The original folder is never modified. The public copy lands in a sibling folder
 npm run build
 ```
 
-The installer ends up at `dist/Coding Drives Setup 1.4.0.exe`.
+The installer ends up at `dist/Coding Drives Setup 1.5.0.exe`.
 
 ### Other scripts
 

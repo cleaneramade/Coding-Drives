@@ -79,6 +79,12 @@ let showStackBadge = false;
 // per-language colour chips are the card's primary "what is this project
 // made of" signal. Round-trips via /api/projects.
 let showLanguageBadges = true;
+// Settings → Preferences → "Send tasks with". Which AI CLI the per-task send
+// buttons launch ("claude" | "codex"). Round-trips via /api/projects.
+let taskAgent = "claude";
+// Per-filter drag-and-drop arrangements, keyed "all" / status id. Each filter
+// page sorts and saves independently; server prepends new arrivals.
+let projectOrders = {};
 
 // Filter chip selection persists across relaunches via localStorage. Chromium's
 // profile lives under Electron's userData, so the value survives the same way
@@ -97,6 +103,19 @@ function writeStoredStatus(id) {
 }
 let activeStatus = readStoredStatus();
 let query = "";
+
+// Per-card "show tasks" toggle (the checklist icon in each card header).
+// Persisted the same way the status filter is, so the cards you work from
+// keep their task list open across relaunches.
+const TASKS_SHOWN_KEY = "cd:tasksShown";
+function readTasksShown() {
+  try { return new Set(JSON.parse(localStorage.getItem(TASKS_SHOWN_KEY)) || []); }
+  catch { return new Set(); }
+}
+const tasksShownCards = readTasksShown();
+function writeTasksShown() {
+  try { localStorage.setItem(TASKS_SHOWN_KEY, JSON.stringify([...tasksShownCards])); } catch {}
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 function fmtTimestamp(iso) {
@@ -144,7 +163,7 @@ const TOAST_ICONS = {
   warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 10 17H2Z"/><path d="M12 10v5"/><circle cx="12" cy="18" r="0.7" fill="currentColor"/></svg>',
 };
 
-function toast({ kind = "info", title, sub, ttlMs = 4000 }) {
+function toast({ kind = "info", title, sub, ttlMs = 4000, action }) {
   const el = document.createElement("div");
   el.className = "toast";
   el.dataset.kind = kind;
@@ -158,13 +177,29 @@ function toast({ kind = "info", title, sub, ttlMs = 4000 }) {
   `;
   el.querySelector(".t-title").textContent = title;
   if (sub) el.querySelector(".t-sub").textContent = sub;
-  toaster.appendChild(el);
-  setTimeout(() => {
+  const dismiss = () => {
     el.style.transition = "opacity 220ms ease, transform 220ms ease";
     el.style.opacity = "0";
     el.style.transform = "translateY(8px)";
     setTimeout(() => el.remove(), 240);
-  }, ttlMs);
+  };
+  // Optional action button (e.g. Undo) — sits on the far right, vertically
+  // centred, opposite the icon + text. Clicking runs the action and
+  // dismisses the toast immediately.
+  if (action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      clearTimeout(timer);
+      dismiss();
+      action.onClick();
+    });
+    el.appendChild(btn);
+  }
+  toaster.appendChild(el);
+  const timer = setTimeout(dismiss, ttlMs);
 }
 
 // ── API ───────────────────────────────────────────────────────────────────
@@ -191,6 +226,8 @@ async function loadProjects() {
   // Languages default to ON — undefined or missing in the API response is
   // treated as enabled so existing installs keep their current behaviour.
   showLanguageBadges = data.showLanguageBadges !== false;
+  taskAgent = data.taskAgent === "codex" ? "codex" : "claude";
+  projectOrders = data.projectOrders || {};
   // Mirror to body attributes so CSS can globally suppress any rogue
   // badge element if the JS branch in buildCard / renderLanguages is ever
   // bypassed (e.g. future template paths that clone a card with a
@@ -208,6 +245,7 @@ async function loadProjects() {
   renderChips();
   renderGrid();
   renderKpis();
+  syncTaskPolling();
 }
 
 // ── Render: KPIs ──────────────────────────────────────────────────────────
@@ -315,8 +353,202 @@ function renderGrid() {
     return true;
   });
 
+  // Each filter page has its own saved arrangement — sort by the active
+  // filter's order list. Slugs not yet listed (status just flipped locally)
+  // float to the top, matching the server's new-arrivals-on-top rule.
+  const pos = new Map((projectOrders[activeStatus] || []).map((s, i) => [s, i]));
+  filtered.sort((a, b) =>
+    (pos.has(a.slug) ? pos.get(a.slug) : -1) -
+    (pos.has(b.slug) ? pos.get(b.slug) : -1)
+  );
+
   empty.hidden = filtered.length > 0;
-  for (const p of filtered) grid.appendChild(buildCard(p));
+  bucketCards(filtered.map((p) => buildCard(p)));
+}
+
+// ── Offset (masonry) layout ───────────────────────────────────────────────
+// Cards are distributed round-robin into N independent flex columns. Reading
+// order stays row-major (cards 1, 2, 3 across the top), but each column
+// stacks on its own: a card growing — tasks shown, added, expanded — only
+// pushes ITS column down, never reshuffling neighbours, and every column
+// ends at its own natural y. N mirrors the old auto-fill/minmax(360px, 1fr)
+// breakpoints so the responsive behaviour is unchanged.
+const MASONRY_MIN_COL = 360;  // px — minimum column width
+const MASONRY_GAP = 18;       // px — must match .grid / .masonry-col gap
+let masonryCols = 0;
+// Authoritative linear (row-major) order of the card elements currently in
+// the grid. The DOM alone can't express it — querySelectorAll walks columns
+// top-to-bottom, which is col-major — so re-buckets and drag-reorders always
+// read/write this array.
+let gridCardOrder = [];
+
+function gridColumnCount() {
+  const cs = getComputedStyle(grid);
+  const w = grid.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  return Math.max(1, Math.floor((w + MASONRY_GAP) / (MASONRY_MIN_COL + MASONRY_GAP)));
+}
+
+function bucketCards(cardEls) {
+  gridCardOrder = [...cardEls];
+  masonryCols = gridColumnCount();
+  grid.textContent = "";
+  const cols = Array.from({ length: masonryCols }, () => {
+    const col = document.createElement("div");
+    col.className = "masonry-col";
+    grid.appendChild(col);
+    return col;
+  });
+  cardEls.forEach((el, i) => cols[i % masonryCols].appendChild(el));
+}
+
+// Phone-home-screen push-over: FLIP-animate every card from its old spot to
+// its new one whenever the order changes mid-drag. skipEl (the card being
+// dragged) is left alone — it's gliding under the pointer on its own
+// transform and must not be animated against it.
+function rebucketWithFlip(cardEls, skipEl) {
+  // First rects = current VISUAL positions (in-flight transforms included),
+  // so an interrupted push-over continues from exactly where it is.
+  const first = new Map(cardEls.map((c) => [c, c.getBoundingClientRect()]));
+  bucketCards(cardEls);
+  // Settle every non-dragged card to its raw layout slot before measuring
+  // destinations — leftover mid-animation transforms would otherwise pollute
+  // the destination rects and make cards visibly jump / overshoot.
+  for (const c of cardEls) {
+    if (c === skipEl) continue;
+    c.style.transition = "none";
+    c.style.transform = "";
+  }
+  void grid.offsetWidth; // one reflow: clean layout to measure against
+  const moving = [];
+  for (const c of cardEls) {
+    if (c === skipEl) continue;
+    const f = first.get(c);
+    const l = c.getBoundingClientRect();
+    const dx = f.left - l.left;
+    const dy = f.top - l.top;
+    if (!dx && !dy) continue;
+    c.style.transform = `translate(${dx}px, ${dy}px)`;
+    moving.push(c);
+  }
+  void grid.offsetWidth; // one reflow: commit all start positions
+  for (const c of moving) {
+    c.style.transition = "transform 200ms cubic-bezier(0.2, 0.7, 0.3, 1)";
+    c.style.transform = "";
+    c.addEventListener("transitionend", function clear() {
+      c.style.transition = "";
+      c.removeEventListener("transitionend", clear);
+    });
+  }
+}
+
+// On resize only re-bucket when the column count actually changes — the
+// existing card nodes move between columns; nothing is rebuilt, so open
+// menus / focused inputs inside cards survive width-only resizes.
+window.addEventListener("resize", () => {
+  if (gridColumnCount() === masonryCols) return;
+  bucketCards(gridCardOrder.filter((el) => el.isConnected));
+});
+
+// ── Drag-to-rearrange project cards ───────────────────────────────────────
+// Native HTML5 drag — the browser's compositor-driven ghost follows the
+// cursor with zero JS in the loop (the smoothest feel by far); the grid
+// FLIPs around the dimmed in-place card. Drop persists the order via
+// /api/projects/reorder.
+let lastCardDragTarget = null;
+let lastCardDragMove = 0;
+let lastCardDragX = 0;
+let lastCardDragY = 0;
+
+// While any of our drags is live, the WHOLE window is a valid drop zone.
+// Without this the cursor flashes ⊘ no-drop over the topbar/background, and
+// releasing there makes Windows play the slow "ghost flies back to origin"
+// animation — both read as glitches.
+document.addEventListener("dragover", (e) => {
+  if (!document.querySelector(".card.card-dragging, .task-item.dragging")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+});
+document.addEventListener("drop", (e) => {
+  if (!document.querySelector(".card.card-dragging, .task-item.dragging")) return;
+  e.preventDefault();
+});
+
+// No dead zones: when the pointer is over a gap / column padding instead of
+// a card, snap to the nearest card (by Y) in the column under the pointer so
+// hovering ANYWHERE on the grid still resorts.
+function nearestCardAt(x, y, exclude) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const col of grid.querySelectorAll(".masonry-col")) {
+    const r = col.getBoundingClientRect();
+    if (x < r.left - MASONRY_GAP || x > r.right + MASONRY_GAP) continue;
+    for (const c of col.querySelectorAll(".card")) {
+      if (c === exclude) continue;
+      const cr = c.getBoundingClientRect();
+      const dy = y < cr.top ? cr.top - y : y > cr.bottom ? y - cr.bottom : 0;
+      if (dy < bestDist) { bestDist = dy; best = c; }
+    }
+  }
+  return best;
+}
+
+grid.addEventListener("dragover", (e) => {
+  const dragging = grid.querySelector(".card.card-dragging");
+  if (!dragging) return;            // a task row drag — its list handles it
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move"; // clean move cursor, never ⊘
+  let target = e.target instanceof Element ? e.target.closest(".card") : null;
+  if (!target) target = nearestCardAt(e.clientX, e.clientY, dragging);
+  if (!target || target === dragging) return;
+  // The same-target block exists ONLY to stop the layout oscillating under a
+  // stationary cursor right after a swap. Real pointer travel since the last
+  // swap means the user is deliberately aiming — re-arm everything so the
+  // card that just shifted can immediately be swapped with again.
+  if (lastCardDragTarget &&
+      Math.hypot(e.clientX - lastCardDragX, e.clientY - lastCardDragY) > 30) {
+    lastCardDragTarget = null;
+  }
+  // One move per hovered card + a throttle so variable-height cards can't
+  // oscillate the layout under the pointer. Gaps never re-arm lastTarget.
+  const now = performance.now();
+  if (target === lastCardDragTarget || now - lastCardDragMove < 120) return;
+  lastCardDragTarget = target;
+  lastCardDragMove = now;
+  lastCardDragX = e.clientX;
+  lastCardDragY = e.clientY;
+  const from = gridCardOrder.indexOf(dragging);
+  const to = gridCardOrder.indexOf(target);
+  if (from === -1 || to === -1 || from === to) return;
+  const next = [...gridCardOrder];
+  next.splice(from, 1);
+  next.splice(to, 0, dragging);
+  rebucketWithFlip(next);
+});
+
+async function finishCardDrag() {
+  lastCardDragTarget = null;
+  // Persist into the ACTIVE filter's order only — every page arranges
+  // independently. Visible slugs re-slot into their existing positions
+  // within this page's list (search may be hiding some members).
+  const orderKey = activeStatus;
+  const visibleSlugs = gridCardOrder.filter((el) => el.isConnected).map((el) => el.dataset.slug);
+  let current = projectOrders[orderKey] || [];
+  // Slugs the page list doesn't know yet (status flipped locally moments
+  // ago) join at the top, mirroring the server's new-arrivals rule.
+  const missing = visibleSlugs.filter((s) => !current.includes(s));
+  if (missing.length) current = [...missing, ...current];
+  const visSet = new Set(visibleSlugs);
+  const slots = current.map((s, i) => (visSet.has(s) ? i : -1)).filter((i) => i >= 0);
+  const next = [...current];
+  slots.forEach((slot, k) => { next[slot] = visibleSlugs[k]; });
+  if (next.join(",") === (projectOrders[orderKey] || []).join(",")) return;
+  projectOrders[orderKey] = next;
+  try {
+    await api("/api/projects/reorder", { method: "POST", body: { filter: orderKey, order: next } });
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't save order", sub: err.message });
+    loadProjects().catch(() => {});
+  }
 }
 
 // Per-language colored badges. Same chip shape as .stack-badge but the
@@ -365,8 +597,6 @@ function makeLangBadge(name, pct, color, extraClass) {
   pctEl.className = "lang-badge-pct";
   pctEl.textContent = fmtPct(pct);
   el.append(nameEl, pctEl);
-
-  el.title = name + " " + fmtPct(pct);
   return el;
 }
 function renderLanguages(node, p) {
@@ -380,9 +610,29 @@ function renderLanguages(node, p) {
   // outright regardless of what the project has.
   if (!showLanguageBadges) { row.hidden = true; return; }
   const list = Array.isArray(p.languages) ? p.languages : [];
-  if (list.length === 0) { row.hidden = true; return; }
+  // A genuinely empty folder (brand-new project, nothing in it yet) has
+  // nothing to say — hide the row rather than filling the space with a
+  // badge. The chip below is reserved for folders that HAVE content whose
+  // language just couldn't be recognised.
+  if (list.length === 0 && p.empty) { row.hidden = true; return; }
   row.hidden = false;
   wrap.textContent = "";
+  // Folder has content but no recognised code files (docs/assets-only
+  // project, unrecognised file types) — show a neutral chip so the gap
+  // reads as "checked, nothing detectable" rather than a broken toggle.
+  if (list.length === 0) {
+    const el = document.createElement("span");
+    el.className = "lang-badge lang-badge-none";
+    el.style.background  = hexToRgba(LANG_OTHER_COLOR, 0.15);
+    el.style.borderColor = hexToRgba(LANG_OTHER_COLOR, 0.55);
+    el.style.color       = LANG_OTHER_COLOR;
+    const nameEl = document.createElement("span");
+    nameEl.className = "lang-badge-name";
+    nameEl.textContent = "No code detected";
+    el.appendChild(nameEl);
+    wrap.appendChild(el);
+    return;
+  }
 
   const visible = list.slice(0, LANG_BADGE_MAX);
   const rest = list.slice(LANG_BADGE_MAX);
@@ -392,15 +642,459 @@ function renderLanguages(node, p) {
   if (rest.length) {
     const otherPct = rest.reduce((s, l) => s + l.pct, 0);
     const badge = makeLangBadge("Other", otherPct, LANG_OTHER_COLOR, "lang-badge-other");
-    badge.title = rest.map((l) => l.name + " " + fmtPct(l.pct)).join("\n");
     wrap.appendChild(badge);
   }
 }
+
+// ── Per-project tasks ─────────────────────────────────────────────────────
+// Rendered into the card's .card-tasks section. Open tasks (anything not
+// complete) show first, capped at TASK_VISIBLE_MAX with a "+N more" expander;
+// completed tasks collapse into the expanded view so the at-a-glance state is
+// always "what's left". Expansion survives re-renders via expandedTaskCards.
+const TASK_VISIBLE_MAX = 3;
+const expandedTaskCards = new Set(); // slugs whose full task list is expanded
+
+// Lifecycle is mostly automatic: the only manual input is the done-toggle
+// (the mark). "in-progress" is set by the app on send, "complete"/"failed"
+// are reported back by the agent.
+const TASK_STATUS_LABEL = {
+  "pending":     "Not done",
+  "in-progress": "In progress",
+  "complete":    "Done",
+  "failed":      "Failed",
+};
+const TASK_MARK_SVG = {
+  // pending: empty ring (pure CSS), in-progress: pulsing dot (pure CSS)
+  "complete": '<svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  "failed":   '<svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg>',
+};
+const TASK_SEND_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+const TASK_TRASH_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></svg>';
+
+function agentLabel() { return taskAgent === "codex" ? "Codex" : "Claude Code"; }
+
+// Rebuild a single card in place — used by task interactions so the whole
+// grid doesn't repaint (which would steal focus from the quick-add input and
+// close open menus on unrelated cards).
+function refreshCard(slug) {
+  const project = projects.find((x) => x.slug === slug);
+  const cardEl = grid.querySelector(`.card[data-slug="${CSS.escape(slug)}"]`);
+  if (!project || !cardEl) { renderGrid(); return null; }
+  const fresh = buildCard(project);
+  // Keep the linear-order array pointing at the live node.
+  const orderIdx = gridCardOrder.indexOf(cardEl);
+  if (orderIdx !== -1) gridCardOrder[orderIdx] = fresh;
+  cardEl.replaceWith(fresh);
+  return fresh;
+}
+
+function buildTaskRow(p, t) {
+  const li = document.createElement("li");
+  li.className = "task-item";
+  li.dataset.status = t.status;
+  li.dataset.taskId = t.id;
+  // Which agent the task was last sent to — drives the in-progress blink
+  // colour (Claude = orange, Codex = white).
+  li.dataset.agent = t.agent === "codex" ? "codex" : "claude";
+
+  // Drag to reorder — rows can be dragged within their card's list; the
+  // list's dragover handler (renderTasks) live-moves the row, dragend
+  // persists whatever order the DOM ends up in.
+  li.draggable = true;
+  li.addEventListener("dragstart", (e) => {
+    li.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", t.id); } catch {}
+  });
+  li.addEventListener("dragend", () => {
+    li.classList.remove("dragging");
+    finishTaskDrag(p, li.closest(".task-list"));
+  });
+
+  // Status mark — the one manual control. Click toggles done ⇄ not done;
+  // on a blinking in-progress task it RESETS to not done instead (the
+  // manual escape hatch when a session was closed early). Failed → done.
+  const mark = document.createElement("button");
+  mark.type = "button";
+  mark.className = "task-mark";
+  const stateLabel = TASK_STATUS_LABEL[t.status] || t.status;
+  const nextStatus = t.status === "complete" || t.status === "in-progress" ? "pending" : "complete";
+  mark.setAttribute("aria-label", `${stateLabel}. ${nextStatus === "pending" ? "Reset to not done" : "Mark done"}: ${t.title}`);
+  mark.innerHTML = TASK_MARK_SVG[t.status] || "";
+  mark.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setTaskStatus(p, t, nextStatus);
+  });
+
+  // Title — click opens the editor (title + description).
+  const title = document.createElement("button");
+  title.type = "button";
+  title.className = "task-title";
+  title.textContent = t.title;
+  title.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openTaskModal(p, t);
+  });
+
+  // Delete — removes the task outright, no modal round-trip.
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "task-delete";
+  del.innerHTML = TASK_TRASH_SVG;
+  del.setAttribute("aria-label", `Delete task: ${t.title}`);
+  del.addEventListener("click", (e) => {
+    e.stopPropagation();
+    deleteTask(p, t.id);
+  });
+
+  // Send — launches the agent in a terminal at the project path with this
+  // task injected. Disabled while the task is already out with an agent.
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "task-send";
+  send.innerHTML = TASK_SEND_SVG;
+  if (t.status === "in-progress") send.disabled = true;
+  send.setAttribute("aria-label", `Send task to ${agentLabel()}: ${t.title}`);
+  send.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sendTasks(p, [t.id]);
+  });
+
+  li.append(mark, title, del, send);
+  return li;
+}
+
+// Shared by the row trash button and the editor modal's Delete. The toast
+// carries an Undo that restores the exact task (same id, status, position)
+// while the notification is still on screen.
+async function deleteTask(p, taskId) {
+  const idx = (p.tasks || []).findIndex((x) => x.id === taskId);
+  const removed = idx === -1 ? null : { ...p.tasks[idx] };
+  try {
+    await api(`/api/projects/${p.slug}/tasks/${taskId}/delete`, { method: "POST", body: {} });
+    p.tasks = (p.tasks || []).filter((x) => x.id !== taskId);
+    refreshCard(p.slug);
+    toast({
+      kind: "info",
+      title: "Task deleted",
+      sub: "Removed from this project's list.",
+      ttlMs: 5000,
+      action: removed ? {
+        label: "Undo",
+        onClick: async () => {
+          try {
+            const r = await api(`/api/projects/${p.slug}/tasks/restore`, {
+              method: "POST",
+              body: { task: removed, index: idx },
+            });
+            const tasks = [...(p.tasks || [])];
+            tasks.splice(Math.min(idx, tasks.length), 0, r.task);
+            p.tasks = tasks;
+            refreshCard(p.slug);
+            syncTaskPolling();
+          } catch (err) {
+            toast({ kind: "error", title: "Couldn't undo", sub: err.message });
+          }
+        },
+      } : undefined,
+    });
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't delete task", sub: err.message });
+  }
+}
+
+// The visible list may be a subset (first 3 + expander), so a drag reorders
+// only the visible rows: their slots in the stored array are re-filled with
+// the new visible sequence, everything else keeps its position.
+function applyVisibleReorder(p, newVisibleIds) {
+  const tasks = p.tasks || [];
+  const visSet = new Set(newVisibleIds);
+  const slots = tasks.map((t, i) => (visSet.has(t.id) ? i : -1)).filter((i) => i >= 0);
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const next = [...tasks];
+  slots.forEach((slot, k) => { next[slot] = byId.get(newVisibleIds[k]); });
+  p.tasks = next;
+  return next.map((t) => t.id);
+}
+
+async function finishTaskDrag(p, list) {
+  if (!list) return;
+  const domIds = [...list.querySelectorAll(".task-item")].map((el) => el.dataset.taskId);
+  const before = (p.tasks || []).map((t) => t.id).join(",");
+  const order = applyVisibleReorder(p, domIds);
+  if (order.join(",") === before) return; // dropped back where it started
+  try {
+    await api(`/api/projects/${p.slug}/tasks/reorder`, { method: "POST", body: { order } });
+    refreshCard(p.slug);
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't reorder", sub: err.message });
+    loadProjects().catch(() => {});
+  }
+}
+
+function renderTasks(node, p) {
+  const wrap = node.querySelector(".card-tasks");
+  if (!wrap) return;
+  const list    = wrap.querySelector(".task-list");
+  const count   = wrap.querySelector(".task-count");
+  const sendAll = wrap.querySelector(".task-send-all");
+  const more    = wrap.querySelector(".task-more");
+  const addBtn  = wrap.querySelector(".task-add-btn");
+  const addInput= wrap.querySelector(".task-add-input");
+
+  const tasks = Array.isArray(p.tasks) ? p.tasks : [];
+  const open  = tasks.filter((t) => t.status !== "complete");
+  const done  = tasks.filter((t) => t.status === "complete");
+  const expanded = expandedTaskCards.has(p.slug);
+
+  // Open-count chip — only when there's something left to do.
+  count.hidden = open.length === 0;
+  count.textContent = String(open.length);
+
+  // Send all — needs at least 2 sendable tasks to earn the extra button.
+  const sendable = open.filter((t) => t.status !== "in-progress");
+  sendAll.hidden = sendable.length < 2;
+  sendAll.onclick = () => sendTasks(p, null);
+
+  // Rows — open first, completed only in the expanded view.
+  list.textContent = "";
+  const ordered = expanded ? [...open, ...done] : open.slice(0, TASK_VISIBLE_MAX);
+  for (const t of ordered) list.appendChild(buildTaskRow(p, t));
+  list.hidden = ordered.length === 0;
+
+  // Drag-and-drop: live-move the dragged row to wherever the pointer sits;
+  // the row's dragend handler persists the resulting DOM order.
+  list.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    const dragging = list.querySelector(".task-item.dragging");
+    if (!dragging) return;
+    const after = [...list.querySelectorAll(".task-item:not(.dragging)")]
+      .find((el) => e.clientY < el.getBoundingClientRect().top + el.offsetHeight / 2);
+    if (after) list.insertBefore(dragging, after);
+    else list.appendChild(dragging);
+  });
+
+  // Expander — counts everything currently hidden (overflow open + done).
+  const hiddenCount = (open.length + done.length) - ordered.length;
+  if (expanded && tasks.length > 0) {
+    more.hidden = false;
+    more.textContent = "Show less";
+    more.onclick = () => { expandedTaskCards.delete(p.slug); refreshCard(p.slug); };
+  } else if (hiddenCount > 0) {
+    more.hidden = false;
+    more.textContent = `+${hiddenCount} more…`;
+    more.onclick = () => { expandedTaskCards.add(p.slug); refreshCard(p.slug); };
+  } else {
+    more.hidden = true;
+  }
+
+  // Quick-add — low-key button that swaps into an inline input. Enter saves
+  // and keeps the input open for rapid entry; Escape or blur-on-empty backs
+  // out to the button.
+  addBtn.addEventListener("click", () => {
+    addBtn.hidden = true;
+    addInput.hidden = false;
+    addInput.focus();
+  });
+  addInput.addEventListener("keydown", async (e) => {
+    if (e.key === "Escape") {
+      addInput.value = "";
+      addInput.hidden = true;
+      addBtn.hidden = false;
+      return;
+    }
+    if (e.key !== "Enter") return;
+    const title = addInput.value.trim();
+    if (!title) return;
+    addInput.disabled = true;
+    try {
+      const r = await api(`/api/projects/${p.slug}/tasks`, { method: "POST", body: { title } });
+      p.tasks = [...tasks, r.task];
+      const freshCard = refreshCard(p.slug);
+      // Rapid entry: keep adding mode active on the rebuilt card. The editor
+      // (description etc.) is opt-in by clicking the task afterwards.
+      const nextInput = freshCard?.querySelector(".task-add-input");
+      const nextBtn   = freshCard?.querySelector(".task-add-btn");
+      if (nextInput && nextBtn) {
+        nextBtn.hidden = true;
+        nextInput.hidden = false;
+        nextInput.focus();
+      }
+    } catch (err) {
+      addInput.disabled = false;
+      toast({ kind: "error", title: "Couldn't add task", sub: err.message });
+    }
+  });
+  addInput.addEventListener("blur", () => {
+    if (!addInput.value.trim() && !addInput.disabled) {
+      addInput.hidden = true;
+      addBtn.hidden = false;
+    }
+  });
+}
+
+// Manual status change from the card (mark click) or editor modal.
+async function setTaskStatus(p, t, status) {
+  const prev = { status: t.status, statusNote: t.statusNote };
+  t.status = status;
+  t.statusNote = "";
+  refreshCard(p.slug);
+  try {
+    await api(`/api/projects/${p.slug}/tasks/${t.id}`, { method: "POST", body: { status } });
+    syncTaskPolling();
+  } catch (err) {
+    Object.assign(t, prev);
+    refreshCard(p.slug);
+    toast({ kind: "error", title: "Couldn't update task", sub: err.message });
+  }
+}
+
+// Send one task (taskIds = [id]) or every open task (taskIds = null) to the
+// agent picked in Settings. The server marks them in-progress, builds the
+// prompt (task + note + report-back instruction), and opens one terminal.
+async function sendTasks(p, taskIds) {
+  try {
+    const result = await api(`/api/projects/${p.slug}/tasks/send`, {
+      method: "POST",
+      body: taskIds ? { taskIds } : {},
+    });
+    if (result && result.notInstalled) {
+      openInstallModal(result);
+      return;
+    }
+    const idSet = taskIds ? new Set(taskIds) : null;
+    const now = new Date().toISOString();
+    for (const t of p.tasks || []) {
+      const targeted = idSet ? idSet.has(t.id) : (t.status === "pending" || t.status === "failed");
+      if (targeted) {
+        t.status = "in-progress";
+        t.statusNote = "";
+        t.sentAt = now;
+      }
+    }
+    refreshCard(p.slug);
+    syncTaskPolling();
+    toast({
+      kind: "info",
+      title: result.count === 1 ? `Task sent to ${agentLabel()}` : `${result.count} tasks sent to ${agentLabel()}`,
+      sub: "Launching in a new terminal.",
+    });
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't send", sub: err.message });
+  }
+}
+
+// Poll while any task is out with an agent so report-backs surface without a
+// manual refresh. Skips a beat whenever the user is mid-interaction (typing
+// in a quick-add input, any modal open, an in-card menu open) — a re-render
+// there would steal focus / slam the menu shut.
+let taskPollTimer = null;
+function anyTasksInProgress() {
+  return projects.some((p) => (p.tasks || []).some((t) => t.status === "in-progress"));
+}
+function taskPollTick() {
+  if (document.querySelector(".modal.is-open")) return;
+  if (document.querySelector('.card[data-menu="open"]')) return;
+  const ae = document.activeElement;
+  if (ae && (ae.classList.contains("task-add-input") || ae.id === "search")) return;
+  loadProjects().catch(() => {});
+}
+function syncTaskPolling() {
+  const active = anyTasksInProgress();
+  if (active && !taskPollTimer) {
+    taskPollTimer = setInterval(taskPollTick, 8000);
+  } else if (!active && taskPollTimer) {
+    clearInterval(taskPollTimer);
+    taskPollTimer = null;
+  }
+}
+
+// ── Task editor modal ─────────────────────────────────────────────────────
+const taskModal      = document.getElementById("modal-task");
+const taskEditTitle  = document.getElementById("task-edit-title");
+const taskEditNote   = document.getElementById("task-edit-note");
+const taskEditReport = document.getElementById("task-edit-report");
+const taskEditDelete = document.getElementById("task-edit-delete");
+const taskEditSave   = document.getElementById("task-edit-save");
+let editingTask = null;            // { slug, id }
+
+function openTaskModal(p, t, { focusNote = false } = {}) {
+  editingTask = { slug: p.slug, id: t.id };
+  taskEditTitle.value = t.title;
+  taskEditNote.value = t.note || "";
+  // Surface the agent's last report so a "failed" has its reason attached.
+  if (t.statusNote) {
+    taskEditReport.hidden = false;
+    taskEditReport.textContent =
+      (t.status === "failed" ? "Agent reported a blocker: " : "Agent report: ") + t.statusNote;
+  } else {
+    taskEditReport.hidden = true;
+    taskEditReport.textContent = "";
+  }
+  taskModal.style.display = "";
+  taskModal.classList.add("is-open");
+  // Fresh from quick-add the title is already written — drop the caret into
+  // the prompt note instead so the natural next step is one keystroke away.
+  (focusNote ? taskEditNote : taskEditTitle).focus();
+}
+function closeTaskModal() {
+  taskModal.classList.remove("is-open");
+  taskModal.style.display = "none";
+  editingTask = null;
+}
+taskModal?.querySelectorAll(".modal-close").forEach((b) => b.addEventListener("click", closeTaskModal));
+taskModal?.querySelector(".modal-backdrop")?.addEventListener("click", closeTaskModal);
+
+taskEditSave?.addEventListener("click", async () => {
+  if (!editingTask) return;
+  const p = projects.find((x) => x.slug === editingTask.slug);
+  const t = p?.tasks?.find((x) => x.id === editingTask.id);
+  if (!p || !t) { closeTaskModal(); return; }
+  const title = taskEditTitle.value.trim();
+  if (!title) {
+    toast({ kind: "error", title: "Task needs a title", sub: "Give it a short summary first." });
+    return;
+  }
+  try {
+    const r = await api(`/api/projects/${p.slug}/tasks/${t.id}`, {
+      method: "POST",
+      body: { title, note: taskEditNote.value },
+    });
+    Object.assign(t, r.task);
+    closeTaskModal();
+    refreshCard(p.slug);
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't save task", sub: err.message });
+  }
+});
+
+taskEditDelete?.addEventListener("click", async () => {
+  if (!editingTask) return;
+  const p = projects.find((x) => x.slug === editingTask.slug);
+  const id = editingTask.id;
+  closeTaskModal();
+  if (p) await deleteTask(p, id);
+});
 
 function buildCard(p) {
   const node = tpl.content.firstElementChild.cloneNode(true);
   node.dataset.slug = p.slug;
   node.dataset.status = p.status;
+
+  // Drag-to-rearrange. Guards: task rows are draggable on their own and
+  // their drag events bubble up here — e.target tells the two apart.
+  node.draggable = true;
+  node.addEventListener("dragstart", (e) => {
+    if (e.target !== node) return;
+    node.classList.add("card-dragging");
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", p.slug); } catch {}
+  });
+  node.addEventListener("dragend", (e) => {
+    if (e.target !== node) return;
+    node.classList.remove("card-dragging");
+    finishCardDrag();
+  });
   node.querySelector(".card-title").textContent = p.name;
 
   // Visit chip — only shown when the project has a github.com origin (set
@@ -527,6 +1221,27 @@ function buildCard(p) {
   node.querySelector(".action-vscode").addEventListener("click", () => openTool(p.slug, "vscode"));
   node.querySelector(".action-claude").addEventListener("click", () => openTool(p.slug, "claude"));
   node.querySelector(".action-codex")?.addEventListener("click",  () => openTool(p.slug, "codex"));
+
+  renderTasks(node, p);
+
+  // Tasks toggle — the checklist icon in the header shows/hides the card's
+  // task section. State persists per project; a small violet dot on the icon
+  // signals "open tasks in here" while the section is collapsed.
+  const taskToggle = node.querySelector(".task-toggle");
+  const tasksSection = node.querySelector(".card-tasks");
+  const tasksOn = tasksShownCards.has(p.slug);
+  const openCount = (p.tasks || []).filter((t) => t.status !== "complete").length;
+  taskToggle.setAttribute("aria-pressed", String(tasksOn));
+  taskToggle.setAttribute("aria-label", tasksOn ? "Hide tasks" : "Show tasks");
+  taskToggle.dataset.hasOpen = openCount > 0 ? "true" : "false";
+  tasksSection.hidden = !tasksOn;
+  taskToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (tasksShownCards.has(p.slug)) tasksShownCards.delete(p.slug);
+    else tasksShownCards.add(p.slug);
+    writeTasksShown();
+    refreshCard(p.slug);
+  });
 
   return node;
 }
@@ -803,7 +1518,6 @@ function populateAddQuick() {
       chip.type = "button";
       chip.className = "add-quick-chip";
       chip.setAttribute("aria-pressed", i === 0 ? "true" : "false");
-      chip.title = "Create new projects in " + root;
       const plus = document.createElement("span");
       plus.className = "add-quick-plus";
       plus.setAttribute("aria-hidden", "true");
@@ -1500,6 +2214,26 @@ function closeAllCardMenus(except) {
   });
 }
 
+// Click anywhere outside an open ⋯ menu closes it. Capture phase, so widgets
+// that stopPropagation (task marks, path pills, badges, …) can't keep a stale
+// menu open. The ⋯ buttons and the menu items themselves are exempt — they
+// run their own toggle/dispatch logic, which already closes the menu.
+document.addEventListener("click", (e) => {
+  const open = document.querySelector('.card[data-menu="open"]');
+  if (!open) return;
+  if (!(e.target instanceof Element)) return;
+  if (e.target.closest(".card-menu") || e.target.closest(".card-menu-view")) return;
+  closeCardMenu(open);
+}, true);
+
+// Escape closes it too — but only when no modal is open, so the key keeps
+// meaning "back out of the topmost layer".
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (document.querySelector(".modal.is-open")) return;
+  closeAllCardMenus();
+});
+
 function populateCardMenu(card, project) {
   const view = card.querySelector(".card-menu-view");
   view.innerHTML = "";
@@ -1514,7 +2248,6 @@ function populateCardMenu(card, project) {
   const publishDesc  = view.querySelector('[data-action="publish-github"] .publish-desc');
   if (publishLabel) publishLabel.textContent = isPublished ? "New Release" : "Publish";
   if (publishDesc)  publishDesc.textContent  = isPublished ? "Tag and publish a release" : "Push to a new GitHub repo";
-  view.querySelector('[data-action="visit-github"]').hidden = !isPublished;
 
   view.querySelectorAll(".popover-item").forEach((item) => {
     item.addEventListener("click", (e) => {
@@ -1534,7 +2267,20 @@ function toggleCardMenu(card, project) {
   // menu, then lock it as min-height. Without this the card jumps size
   // because the menu grid is more compact than the stacked body sections —
   // the user wants the card footprint stable across both states.
+  //
+  // Measure WITHOUT the per-card variable sections — the tasks list and the
+  // language row. Tasks can make a card several times taller than its
+  // default body, and the language row comes and goes per project; either
+  // would make menu-mode cards open at different heights. Excluding both
+  // means EVERY card's menu opens at the same standard envelope, and the
+  // hidden sections come back when the menu closes.
+  const hideForMeasure = [
+    card.querySelector(".card-tasks"),
+    card.querySelector(".card-row-langs"),
+  ].filter((el) => el && !el.hidden);
+  hideForMeasure.forEach((el) => { el.hidden = true; });
   const lockedHeight = card.offsetHeight;
+  hideForMeasure.forEach((el) => { el.hidden = false; });
   populateCardMenu(card, project);
   card.style.minHeight = `${lockedHeight}px`;
   card.dataset.menu = "open";
@@ -1553,9 +2299,6 @@ async function dispatchCardMenuAction(action, project, card) {
     // (initial) and "Publish New Release" (re-publish: overwrite OR new
     // release) based on whether project.githubUrl is set.
     openGithubModal(project, project.githubUrl ? "release" : "initial");
-  }
-  else if (action === "visit-github") {
-    if (project.githubUrl) window.open(project.githubUrl, "_blank", "noopener");
   }
   else if (action === "archive")        await updateStatus(project.slug, "archived");
   else if (action === "unarchive")      await updateStatus(project.slug, "in-progress");
@@ -1627,6 +2370,8 @@ function openSettings() {
       openClaudeInDesktop: cfg.openClaudeInDesktop === true,
       // Same opt-in for Codex (uses `codex app <folder>` instead of a deep link).
       openCodexInDesktop: cfg.openCodexInDesktop === true,
+      // Which AI CLI the task send buttons launch. Claude unless opted out.
+      taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
     };
     renderSettings();
     settingsError("");
@@ -1666,6 +2411,23 @@ document.getElementById("set-claude-desktop")?.addEventListener("change", (e) =>
 document.getElementById("set-codex-desktop")?.addEventListener("change", (e) => {
   if (settingsState) settingsState.openCodexInDesktop = e.target.checked;
 });
+// Task agent segment — which CLI the per-task send buttons launch. Same
+// slide-segment pattern as the publish modal's visibility control.
+function setTaskAgentSegment(v) {
+  const seg = document.getElementById("set-task-agent");
+  if (!seg) return;
+  const val = v === "codex" ? "codex" : "claude";
+  seg.dataset.active = val;
+  seg.querySelectorAll(".gh-vis-opt").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.value === val))
+  );
+}
+document.getElementById("set-task-agent")?.addEventListener("click", (e) => {
+  const opt = e.target.closest(".gh-vis-opt");
+  if (!opt) return;
+  if (settingsState) settingsState.taskAgent = opt.dataset.value === "codex" ? "codex" : "claude";
+  setTaskAgentSegment(opt.dataset.value);
+});
 
 // Display form for a scan-folder pill: drop the leading "<drive>:\Users\<name>\"
 // so the badge reads e.g. "Documents\♾️ Coding Projects - Local" (or just
@@ -1692,6 +2454,8 @@ function renderSettings() {
   if (claudeDesktopEl) claudeDesktopEl.checked = !!settingsState.openClaudeInDesktop;
   const codexDesktopEl = document.getElementById("set-codex-desktop");
   if (codexDesktopEl) codexDesktopEl.checked = !!settingsState.openCodexInDesktop;
+  // Task agent segment
+  setTaskAgentSegment(settingsState.taskAgent);
 
   // Logo preview — bust cache so a freshly uploaded file shows.
   document.getElementById("set-logo-preview").src = "/api/logo?t=" + Date.now();
@@ -1710,7 +2474,6 @@ function renderSettings() {
     item.innerHTML = `<span></span><button class="remove" type="button" aria-label="Remove">✕</button>`;
     const txt = item.querySelector("span");
     txt.textContent = shortenScanPath(p);
-    txt.title = p;   // full path on hover, since the badge shows the shortened path
     item.querySelector(".remove").addEventListener("click", () => {
       settingsState.scanPaths.splice(i, 1);
       renderSettings();
@@ -1911,6 +2674,7 @@ document.getElementById("set-save").addEventListener("click", async () => {
     showLanguageBadges: !!settingsState.showLanguageBadges,
     openClaudeInDesktop: !!settingsState.openClaudeInDesktop,
     openCodexInDesktop: !!settingsState.openCodexInDesktop,
+    taskAgent: settingsState.taskAgent === "codex" ? "codex" : "claude",
   };
   try {
     await api("/api/config", { method: "POST", body: patch });

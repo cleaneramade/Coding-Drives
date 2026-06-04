@@ -1,7 +1,7 @@
 {
   "name": "coding-drives",
   "productName": "Coding Drives",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "See every coding project on your PC in one dashboard. Open them in VS Code, Claude Code, or Codex, back them up safely, and publish to GitHub.",
@@ -70,12 +70,7 @@
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
+        { "target": "nsis", "arch": ["x64"] }
       ],
       "artifactName": "Coding Drives Setup ${version}.exe"
     },

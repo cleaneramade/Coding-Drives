@@ -313,6 +313,27 @@ body {
 }
 .icon-btn:hover { background: var(--surface-3); color: var(--fg-1); }
 
+/* Tasks toggle (card header) — violet "on" state mirrors the open-menu
+   highlight language; the corner dot flags open tasks while collapsed. */
+.icon-btn.task-toggle { position: relative; }
+.icon-btn.task-toggle[aria-pressed="true"] {
+  background: var(--tile-violet-bg);
+  border-color: var(--brand-500);
+  color: var(--brand-300);
+}
+/* Notification-style dot: pinned on the button's top-right corner, with a
+   card-coloured ring that cleanly "punches out" the border stroke beneath it
+   instead of awkwardly clipping it. */
+.icon-btn.task-toggle[aria-pressed="false"][data-has-open="true"]::after {
+  content: "";
+  position: absolute;
+  top: -1px; right: -1px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--brand-400);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
 /* Primary-action button in the modal header — small brand-violet text
    button (NOT an icon button) sized to sit comfortably to the left of
    the .modal-close X without overpowering it. Same hover and active
@@ -524,19 +545,30 @@ body {
 }
 
 /* ── Grid ─────────────────────────────────────────────────────────────────── */
+/* Offset (masonry) layout: the grid is a flex row of independent columns
+   (.masonry-col, created in bucketCards in app.js). Each column stacks its
+   own cards with a fixed 18px gutter, so a card growing — tasks shown /
+   added / expanded — only pushes its own column down, and every column ends
+   at its own natural y. */
 .grid {
   position: relative; z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  display: flex;
+  align-items: flex-start;
   gap: 18px;
   padding: 0 48px 48px;
+}
+.masonry-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
 @media (max-width: 880px) {
   .topbar, .filters, .grid { padding-left: 20px; padding-right: 20px; }
   .topbar { flex-direction: column; align-items: flex-start; }
   .kpi-row { width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .grid { grid-template-columns: 1fr; }
   .cta-row { margin-left: 0; }
 }
 
@@ -764,8 +796,10 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   /* Right padding tight so the copy button hugs the edge without
-     looking like it floats inside extra space. */
-  padding: 4px 4px 4px 8px;
+     looking like it floats inside extra space. Vertical padding sized so
+     the pill lands at 40px — the same height as a task row (28px copy
+     button + 5px ×2 + 1px borders). */
+  padding: 5px 4px 5px 8px;
   /* Whole pill is the click target — copies the path on click. The icon
      inside is a visual hint, not the only target. */
   cursor: pointer;
@@ -781,6 +815,8 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
 .card-path:hover {
   color: var(--fg-3);
 }
+/* Pill-hover brightens the icon — the ONE hover indication for the whole
+   pill (the entire pill is the click target and copies anyway). */
 .card-path:hover .card-path-copy { color: var(--fg-1); }
 .card-path:active,
 .card-path:focus,
@@ -797,32 +833,40 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Same footprint + style language as the task row's send/delete buttons:
+   28px square, transparent until hover, 13px glyph, violet tint ramp. */
 .card-path-copy {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   background: transparent;
-  border: 0;
+  border: 1px solid transparent;
   color: var(--fg-3);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
   transition: color var(--dur) var(--ease-out),
-              background var(--dur) var(--ease-out);
+              background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out);
 }
+.card-path-copy svg { width: 13px; height: 13px; }
+/* No button-level hover chrome — the pill's own hover is the indication;
+   a second violet ring on the icon double-signalled the same action. */
 .card-path-copy:hover {
   color: var(--fg-1);
   background: transparent;
+  border-color: transparent;
 }
-/* No click flash on the inner icon — paired with the pill's flat :active so
-   nothing in the row lights up when you click. The toast does the talking. */
+/* Clicking must not change the button's look — whatever state it's in
+   (resting or violet hover) stays exactly as-is through mousedown/focus.
+   Only the default outline/shadow are suppressed; the toast does the
+   talking. */
 .card-path-copy:active,
 .card-path-copy:focus,
 .card-path-copy:focus-visible {
-  background: transparent;
   outline: 0;
   box-shadow: none;
 }
@@ -833,6 +877,194 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
 .card-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .card-actions .btn { padding: 9px 10px; }
 .card-actions .vendor-label { font-size: 12px; }
+
+/* ── Card tasks ───────────────────────────────────────────────────────────── */
+.card-tasks { display: flex; flex-direction: column; gap: 6px; }
+.card-tasks-head { display: flex; align-items: center; gap: 8px; }
+.task-count {
+  font-size: 10px; font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--tile-violet-bg);
+  border: 1px solid var(--brand-500);
+  color: var(--brand-300);
+}
+.task-send-all {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 11px; font-weight: 600;
+  color: var(--brand-300);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
+}
+.task-send-all:hover { background: var(--tile-violet-bg); border-color: var(--brand-500); }
+
+.task-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.task-item {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0;
+  padding: 5px 5px 5px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+/* Status mark — dashed ring (pending, "not done yet"), pulsing violet dot
+   (in-progress), green check (complete), red ✕ (failed). Click toggles
+   complete ⇄ pending; the editor modal covers the rest. */
+.task-mark {
+  flex: none;
+  width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1.5px dashed var(--fg-4);
+  border-radius: 50%;
+  color: transparent;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.task-item[data-status="pending"] .task-mark:hover { border-color: var(--success); }
+/* In progress — dotted ring blinking while the agent works: orange for
+   Claude, white for Codex. Done / failed land as solid filled marks. */
+.task-item[data-status="in-progress"] .task-mark {
+  border-color: var(--warning);
+  animation: task-ring-pulse 1.4s ease-in-out infinite;
+}
+.task-item[data-status="in-progress"][data-agent="codex"] .task-mark {
+  border-color: var(--fg-1);
+}
+@keyframes task-ring-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+.task-item[data-status="complete"] .task-mark,
+.task-item[data-status="failed"]   .task-mark { border-style: solid; }
+.task-item[data-status="complete"] .task-mark { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+.task-item[data-status="failed"]   .task-mark { border-color: var(--danger);  background: var(--danger-soft);  color: var(--danger); }
+
+.task-title {
+  flex: 1; min-width: 0;
+  text-align: left;
+  font: inherit; font-size: 12px; font-weight: 500;
+  color: var(--fg-2);
+  background: transparent; border: 0; padding: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+.task-title:hover { color: var(--fg-1); }
+.task-item[data-status="complete"] .task-title { color: var(--fg-4); text-decoration: line-through; }
+
+.task-send {
+  flex: none;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
+}
+/* Optical centering: the paper-plane glyph is weighted to its top-right
+   corner, so a hair down-and-left makes it sit visually centred. */
+.task-send svg { width: 13px; height: 13px; transform: translate(-0.5px, 0.5px); }
+.task-send:hover:not(:disabled) { color: var(--brand-300); background: var(--tile-violet-bg); border-color: var(--brand-500); }
+.task-send:disabled { opacity: 0.35; cursor: default; }
+
+/* Delete — same footprint as the send button, danger ramp on hover. */
+.task-delete {
+  flex: none;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
+}
+.task-delete:hover { color: var(--danger); background: var(--danger-soft); border-color: var(--danger); }
+.task-delete svg { width: 13px; height: 13px; }
+/* Pull send in tight against delete — the row's 8px gap reads too far apart
+   for a paired action cluster (effective gap: 3px). */
+.task-item .task-send { margin-left: -5px; }
+
+/* Drag-to-reorder */
+.task-item { cursor: grab; }
+.task-item.dragging { opacity: 0.45; cursor: grabbing; }
+
+/* Card drag affordance — open hand on empty card areas. */
+.card { cursor: grab; }
+
+/* Card being dragged — the browser ghost follows the cursor; the in-grid
+   original dims while the others FLIP around it. */
+.card.card-dragging { opacity: 0.5; }
+
+.task-more {
+  align-self: flex-start;
+  font: inherit; font-size: 11px; font-weight: 600;
+  color: var(--fg-3);
+  background: transparent; border: 0; padding: 0 2px;
+  cursor: pointer;
+}
+.task-more:hover { color: var(--fg-1); }
+
+.task-add { display: flex; }
+.task-add-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 11px; font-weight: 600;
+  color: var(--fg-3);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
+}
+.task-add-btn:hover { color: var(--fg-1); border-color: var(--fg-4); }
+/* The input IS a task row being written — identical surface, border, font,
+   and height as .task-item, with no focus ring (the caret is the signal).
+   Height = the 28px send button + 5px row padding ×2 + 1px borders that set
+   a real task row's height. */
+.task-add-input {
+  flex: 1; min-width: 0;
+  height: 40px;
+  font: inherit; font-size: 12px; font-weight: 500;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 11px;
+  outline: none;
+}
+.task-add-input::placeholder { color: var(--fg-4); }
+
+/* Task editor modal — fixed-height description: no resize handle, generous
+   default, scrolls past that. */
+#task-edit-note {
+  resize: none;
+  height: 150px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.task-edit-delete { color: var(--danger); }
+/* Hover goes properly red — soft danger fill instead of the generic ghost
+   gray, so the destructive action reads as destructive. */
+.task-edit-delete:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
 
 .btn[data-busy="true"] { pointer-events: none; opacity: 0.85; }
 .btn[data-busy="true"] svg { animation: spin 0.7s linear infinite; }
@@ -865,6 +1097,8 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   grid-template-columns: 32px 1fr;
   align-items: center;
   gap: 12px;
+  /* (a third auto column appears when the toast carries an action button —
+     see .toast:has(.toast-action) below) */
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 3px solid var(--brand-500);
@@ -897,6 +1131,21 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   flex-shrink: 0;
 }
 .toast-icon svg { width: 16px; height: 16px; }
+
+/* Action button (e.g. Undo) — far right, vertically centred, opposite the
+   icon + text. The grid grows a third column to seat it. */
+.toast:has(.toast-action) { grid-template-columns: 32px 1fr auto; }
+.toast-action {
+  font: inherit; font-size: 12px; font-weight: 700;
+  color: var(--brand-300);
+  background: var(--tile-violet-bg);
+  border: 1px solid var(--brand-500);
+  border-radius: var(--radius-pill);
+  padding: 5px 13px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.toast-action:hover { color: var(--fg-0, #fff); background: var(--brand-600); }
 
 /* Per-kind colored glow is softened from 0.45 → 0.20 — the previous strength
    read as the same halo pattern we removed from CTAs. At 0.20 the semantic
@@ -1031,12 +1280,12 @@ body:has(.modal.is-open) { overflow: hidden; }
 }
 .modal-foot .grow { flex: 1; }
 /* The global .btn-ghost is intentionally smaller (8px padding) for inline use,
-   which left the footer's Reset/Cancel 4px shorter than the brand "Save" button.
-   Restore the base 10px padding on the footer's own ghost buttons so all three
-   footer buttons are the same height. Scoped to direct children so the
-   multi-row wizard/release footers (which wrap buttons in .modal-foot-row) are
-   untouched. */
-.modal-foot > .btn-ghost { padding: 10px 14px; }
+   which left footer ghost buttons (Reset/Cancel/Delete/Back) 4px shorter than
+   the brand "Save"/"Launch" buttons beside them. Restore the base 10px padding
+   in BOTH footer shapes — plain .modal-foot and the wrapped .modal-foot-row —
+   so every footer button is the same height. */
+.modal-foot > .btn-ghost,
+.modal-foot-row > .btn-ghost { padding: 10px 14px; }
 
 /* ── Prepare for GitHub modal ────────────────────────────────────────────── */
 .gh-field { display: flex; flex-direction: column; gap: 4px; }
@@ -1226,7 +1475,8 @@ body:has(.modal.is-open) { overflow: hidden; }
   box-sizing: border-box;
 }
 .gh-vis-segment[data-active="private"] .gh-vis-thumb,
-.gh-vis-segment[data-active="release"] .gh-vis-thumb {
+.gh-vis-segment[data-active="release"] .gh-vis-thumb,
+.gh-vis-segment[data-active="codex"]   .gh-vis-thumb {
   transform: translateX(100%);
 }
 .gh-vis-opt {
@@ -1247,7 +1497,9 @@ body:has(.modal.is-open) { overflow: hidden; }
 .gh-vis-segment[data-active="public"]    .gh-vis-opt[data-value="public"],
 .gh-vis-segment[data-active="private"]   .gh-vis-opt[data-value="private"],
 .gh-vis-segment[data-active="overwrite"] .gh-vis-opt[data-value="overwrite"],
-.gh-vis-segment[data-active="release"]   .gh-vis-opt[data-value="release"] {
+.gh-vis-segment[data-active="release"]   .gh-vis-opt[data-value="release"],
+.gh-vis-segment[data-active="claude"]    .gh-vis-opt[data-value="claude"],
+.gh-vis-segment[data-active="codex"]     .gh-vis-opt[data-value="codex"] {
   color: var(--fg-1);
 }
 /* ── Add Project modal ──────────────────────────────────────────────────── */
@@ -1379,9 +1631,11 @@ body:has(.modal.is-open) { overflow: hidden; }
   letter-spacing: var(--tracking-snug);
   text-decoration: none;
   flex-shrink: 0;
-  transition: transform var(--dur-fast) var(--ease-out), background var(--dur) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-out), background var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
-.gh-visit-badge:hover { transform: translateY(-1px); background: var(--surface-3); }
+/* Hover matches the toast Undo button — fills brand violet with white text
+   instead of the washed gray surface it used before. */
+.gh-visit-badge:hover { transform: translateY(-1px); background: var(--brand-600); color: #fff; }
 .gh-visit-badge svg   { display: block; flex-shrink: 0; }
 .gh-visit-badge span  { line-height: 1; }
 
@@ -1582,6 +1836,7 @@ body:has(.modal.is-open) { overflow: hidden; }
    used to take. */
 .card[data-menu="open"] > .card-row,
 .card[data-menu="open"] > .card-path-row,
+.card[data-menu="open"] > .card-tasks,
 .card[data-menu="open"] > .card-actions { display: none; }
 .card[data-menu="open"] .card-menu { background: var(--surface-3); color: var(--fg-1); }
 .card-menu-view { display: none; }

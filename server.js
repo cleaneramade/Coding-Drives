@@ -618,6 +618,13 @@ async function describeProject(full, root, source) {
       stack, stacks, indicators, languages, languagesTruncated,
     });
   }
+  // Distinguish a genuinely empty folder (brand-new project, nothing in it)
+  // from a folder with content whose language just couldn't be detected —
+  // the card hides the language row for the former and shows a "No code
+  // detected" chip for the latter. Top-level readdir only; cheap next to the
+  // stat + stack walk above.
+  let empty = false;
+  try { empty = (await fsp.readdir(full)).length === 0; } catch {}
   return {
     slug: toSlug(full),
     name: path.basename(full),
@@ -629,6 +636,7 @@ async function describeProject(full, root, source) {
     indicators,
     languages,
     languagesTruncated,
+    empty,
     githubUrl: indicators.git ? detectGithubUrl(full) : null,
     mtime: stat.mtimeMs,
   };
@@ -687,6 +695,10 @@ async function scanProjects(cfg) {
 // ─── Express app ────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: "1mb" }));
+// Task report callbacks arrive from the AI CLI as `curl --data-urlencode`
+// (form-encoded) because that's the most quote-proof shape to put inside an
+// injected prompt — accept it alongside JSON.
+app.use(express.urlencoded({ extended: false }));
 
 // No-cache headers on every static asset. Electron's embedded Chromium will
 // otherwise hold onto cached app.css / app.js / index.html across relaunches
@@ -862,7 +874,27 @@ app.post("/api/settings/reset", async (_req, res) => {
 
 app.get("/api/projects", async (_req, res) => {
   const cfg = loadConfig();
-  const [projects, db] = await Promise.all([scanProjects(cfg), readDB()]);
+  let [projects, db] = await Promise.all([scanProjects(cfg), readDB()]);
+  // Lazy staleness sweep — runs on every fetch (refresh, focus, poll), so a
+  // task stuck blinking after a dead/failed session resolves itself to
+  // "failed" the next time the dashboard looks at it.
+  const nowMs = Date.now();
+  const anyStale = Object.values(db).some((e) => (e?.tasks || []).some((t) => isStaleTask(t, nowMs)));
+  if (anyStale) {
+    db = await updateDB((d) => {
+      const iso = new Date(nowMs).toISOString();
+      for (const entry of Object.values(d)) {
+        for (const t of entry?.tasks || []) {
+          if (!isStaleTask(t, nowMs)) continue;
+          t.status = "failed";
+          t.statusNote = t.ackedAt
+            ? "No report after 2 hours — the session may have been closed."
+            : "The agent never checked in — the session likely failed to start.";
+          t.updatedAt = iso;
+        }
+      }
+    });
+  }
   const merged = projects.map((p) => {
     const stored = db[p.slug]?.status;
     const status = STATUS_MIGRATIONS[stored] || stored || "in-progress";
@@ -877,12 +909,48 @@ app.get("/api/projects", async (_req, res) => {
       ...p,
       status,
       notes: db[p.slug]?.notes || "",
+      tasks: Array.isArray(db[p.slug]?.tasks) ? db[p.slug].tasks : [],
       lastBackedUpAt: db[p.slug]?.lastBackedUpAt || db[p.slug]?.lastDuplicatedAt || null,
       lastBackedUpDest,
       lastBackedUpExists,
       updatedAt: db[p.slug]?.updatedAt || null,
     };
   });
+  // Per-filter sticky card order. Each filter page ("all" + every status)
+  // keeps its OWN drag-and-drop arrangement, persisted independently, and
+  // anything newly arriving on a page — a brand-new project, or one whose
+  // status just changed — lands at the TOP of that page. mtime changes /
+  // rescans never auto-resort anything; only drag-and-drop rearranges.
+  const orders = { ...(cfg.projectOrders || {}) };
+  // One-time migration from the original single-list key.
+  if (!Array.isArray(orders.all) && Array.isArray(cfg.projectOrder)) {
+    orders.all = cfg.projectOrder;
+  }
+  const filterKeys = ["all", ...(cfg.statuses || []).map((s) => s.id)];
+  let ordersChanged = false;
+  for (const key of filterKeys) {
+    const members = merged.filter((p) =>
+      key === "all" ? p.status !== "archived" : p.status === key
+    );
+    const list = Array.isArray(orders[key]) ? orders[key] : [];
+    const known = new Set(list);
+    // merged is recency-sorted here, so multiple fresh arrivals stack
+    // newest-first at the top.
+    const fresh = members.filter((p) => !known.has(p.slug)).map((p) => p.slug);
+    if (fresh.length || !Array.isArray(orders[key])) {
+      orders[key] = [...fresh, ...list];
+      ordersChanged = true;
+    }
+  }
+  if (ordersChanged) await saveUserConfig({ projectOrders: orders });
+  // Payload default order = the "all" arrangement; the client re-sorts per
+  // active filter from the projectOrders map below.
+  const allPos = new Map((orders.all || []).map((s, i) => [s, i]));
+  merged.sort((a, b) =>
+    ((allPos.has(a.slug) ? allPos.get(a.slug) : Infinity) -
+     (allPos.has(b.slug) ? allPos.get(b.slug) : Infinity)) ||
+    (b.mtime - a.mtime)
+  );
   // Sync the local-detected github origin against github.com — drop the
   // visit chip + flip the popover back to "publish" mode for any repo the
   // user has since deleted on github.com. Cached per-URL with a TTL, so
@@ -904,6 +972,12 @@ app.get("/api/projects", async (_req, res) => {
     // default to ON. Treat undefined as enabled so existing installs that
     // never wrote this key keep their current behaviour.
     showLanguageBadges: cfg.showLanguageBadges !== false,
+    // Which AI CLI the per-task send buttons launch (Settings → Preferences).
+    // Surfaced here so the frontend can label its send toasts correctly.
+    taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
+    // Per-filter drag-and-drop arrangements — the client sorts the grid by
+    // the active filter's list.
+    projectOrders: orders,
   });
 });
 
@@ -1020,6 +1094,21 @@ app.post("/api/path/inspect", (req, res) => {
   return res.json({ state: "create", path: norm, name, parent });
 });
 
+// Persist a manual dashboard order (drag-and-drop). Body:
+// { filter: "all" | <status id>, order: [slug, …] } — each filter page keeps
+// its own independent arrangement. Saved to user config rather than the
+// projects DB — it's presentation state, like scanPaths. Registered BEFORE
+// the :slug route so "reorder" never parses as a slug.
+app.post("/api/projects/reorder", async (req, res) => {
+  const order = Array.isArray(req.body?.order) ? req.body.order.map(String) : null;
+  if (!order) return res.status(400).json({ error: "order required" });
+  const filter = typeof req.body?.filter === "string" && req.body.filter ? req.body.filter : "all";
+  const orders = { ...(loadUserConfig().projectOrders || {}) };
+  orders[filter] = order;
+  await saveUserConfig({ projectOrders: orders });
+  res.json({ ok: true });
+});
+
 app.post("/api/projects/:slug", async (req, res) => {
   const slug = req.params.slug;
   const folder = fromSlug(slug);
@@ -1034,6 +1123,375 @@ app.post("/api/projects/:slug", async (req, res) => {
     db[slug] = update;
   });
   res.json({ ok: true, entry: update });
+});
+
+// ─── Per-project tasks ───────────────────────────────────────────────────────
+// Tasks live in db[slug].tasks. Lifecycle:
+//   pending     — created, not yet dispatched
+//   in-progress — set by the app the moment a task is sent to Claude/Codex
+//   complete    — reported back by the AI session via /api/tasks/report
+//   failed      — reported back with a blocker note
+// Every status is also manually settable from the card (agents occasionally
+// forget to report, and users close terminals mid-task) — the report endpoint
+// is a convenience, never the only way out of "in-progress".
+const TASK_STATUSES = new Set(["pending", "in-progress", "complete", "failed"]);
+
+// Staleness rules for in-progress tasks. The send prompt's FIRST step has
+// the agent acknowledge pickup (POST /api/tasks/ack/:slug); a task that was
+// never acknowledged within ACK_TIMEOUT (CLI failed to launch, terminal
+// closed instantly, send chain broke) — or acknowledged but unreported
+// within WORK_TIMEOUT (session killed mid-task) — auto-flips to failed with
+// an explanatory note instead of blinking forever.
+const TASK_ACK_TIMEOUT_MS  = 5 * 60 * 1000;        // never checked in
+const TASK_WORK_TIMEOUT_MS = 2 * 60 * 60 * 1000;   // checked in, went silent
+
+function isStaleTask(t, now) {
+  if (t.status !== "in-progress" || !t.sentAt) return false;
+  const sent = Date.parse(t.sentAt);
+  if (!Number.isFinite(sent)) return false;
+  if (!t.ackedAt) return now - sent > TASK_ACK_TIMEOUT_MS;
+  return now - sent > TASK_WORK_TIMEOUT_MS;
+}
+
+function newTaskId() {
+  // Short, URL-safe, unique enough for a per-project list. Avoids "send"
+  // (which would shadow the /tasks/send route) by always prefixing "t".
+  return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+// Task text travels through cmd.exe inside the injected prompt — flatten
+// whitespace so a multi-line note can't break the single-line command, and
+// cap length so a pasted essay doesn't blow past cmd's limit.
+function flattenTaskText(s, max) {
+  return String(s || "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+// Create. Body: { title, note? }
+app.post("/api/projects/:slug/tasks", async (req, res) => {
+  const slug = req.params.slug;
+  if (!fs.existsSync(fromSlug(slug))) return res.status(404).json({ error: "folder not found" });
+  const title = flattenTaskText(req.body?.title, 200);
+  if (!title) return res.status(400).json({ error: "title required" });
+  const now = new Date().toISOString();
+  const task = {
+    id: newTaskId(),
+    title,
+    note: String(req.body?.note || "").trim().slice(0, 2000),
+    status: "pending",
+    statusNote: "",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await updateDB((db) => {
+    const entry = db[slug] || {};
+    entry.tasks = Array.isArray(entry.tasks) ? entry.tasks : [];
+    entry.tasks.push(task);
+    entry.updatedAt = now;
+    db[slug] = entry;
+  });
+  res.json({ ok: true, task });
+});
+
+// Builds the prompt injected into the spawned CLI session. Single-line by
+// design — spawnAiPrompt's cmd /k chain can't carry raw newlines. The report
+// command uses query params + --data-urlencode because that survives every
+// shell the agent might run it from (cmd, PowerShell, bash) without JSON
+// quoting gymnastics.
+function buildTaskPrompt(slug, tasks, port) {
+  // Structured, multi-line prompt — delivered via spawnAiPrompt's file relay,
+  // so newlines and any characters in user text arrive verbatim. Shape:
+  //   TASK: <title>
+  //
+  //   DESCRIPTION:        (only when the user wrote one)
+  //   <their words, as written>
+  //
+  //   <standard report-back instructions>
+  const reportCmd =
+    `curl -s -X POST http://127.0.0.1:${port}/api/tasks/report/${slug}/TASK_ID/STATUS --data-urlencode note=SUMMARY`;
+  const ackCmd =
+    `curl -s -X POST http://127.0.0.1:${port}/api/tasks/ack/${slug}`;
+  // Double quotes become apostrophes: Windows PowerShell 5.1 (the relay that
+  // hands the prompt to the CLI) drops embedded " and splits the argument
+  // there. Everything else — newlines, dashes, &, parens — passes verbatim.
+  const noteOf = (t) => String(t.note || "").trim().slice(0, 4000).replace(/"/g, "'");
+  const titleOf = (t) => flattenTaskText(t.title, 200).replace(/"/g, "'");
+
+  if (tasks.length === 1) {
+    const t = tasks[0];
+    const note = noteOf(t);
+    return [
+      "Complete the following task in the current project directory.",
+      "",
+      "TASK: " + titleOf(t),
+      ...(note ? ["", "DESCRIPTION:", note] : []),
+      "",
+      "FIRST — before doing anything else, confirm pickup by running:",
+      ackCmd,
+      "",
+      "WHEN DONE — report the outcome by running:",
+      reportCmd.replace("TASK_ID", t.id),
+      "Replace STATUS with complete (task done) or failed (a blocker you could not resolve), " +
+      "and SUMMARY with a one-line summary of what you did or what blocked you, quoted as needed for your shell.",
+      "Then give me a short wrap-up of what changed.",
+    ].join("\n");
+  }
+
+  const blocks = tasks.map((t, i) => {
+    const note = noteOf(t);
+    return `TASK ${i + 1} (id ${t.id}): ${titleOf(t)}` +
+      (note ? `\nDESCRIPTION:\n${note}` : "");
+  }).join("\n\n");
+  return [
+    "Work through the following tasks IN ORDER, one at a time, in the current project directory.",
+    "",
+    blocks,
+    "",
+    "FIRST — before doing anything else, confirm pickup by running:",
+    ackCmd,
+    "",
+    "AFTER EACH TASK — immediately report it (before starting the next) by running:",
+    reportCmd,
+    "Use that task's id for TASK_ID. Replace STATUS with complete (task done) or failed (a blocker you could not resolve), " +
+    "and SUMMARY with a one-line summary of what you did or what blocked you, quoted as needed for your shell.",
+    "If a task fails, report it as failed and continue with the next one.",
+    "When all tasks are reported, give me a short wrap-up of what changed.",
+  ].join("\n");
+}
+
+// Send one task / a set of tasks / all open tasks to the AI agent picked in
+// Settings (cfg.taskAgent). One terminal, one session — tasks are queued in
+// order inside a single prompt so parallel agents never collide editing the
+// same project folder. Body: { taskIds?: string[] } — omitted means "all
+// pending + failed tasks".
+app.post("/api/projects/:slug/tasks/send", async (req, res) => {
+  const slug = req.params.slug;
+  const folder = fromSlug(slug);
+  if (!fs.existsSync(folder)) return res.status(404).json({ error: "folder not found" });
+
+  const cfg = loadConfig();
+  const cliKey = cfg.taskAgent === "codex" ? "codex" : "claude";
+  const cliExecutable = cfg.tools?.[cliKey] || cliKey;
+
+  // Same pre-flight install gate as the open/ai-launch handlers — a missing
+  // CLI would otherwise flash a dead terminal with no explanation.
+  if (INSTALLABLE_TOOLS[cliKey] && !isCommandOnPath(cliExecutable)) {
+    const meta = INSTALLABLE_TOOLS[cliKey];
+    return res.json({
+      ok: false,
+      notInstalled: true,
+      tool: cliKey,
+      displayName: meta.displayName,
+      npmPackage: meta.npmPackage,
+      installCmd: `npm install -g ${meta.npmPackage}`,
+    });
+  }
+
+  const ids = Array.isArray(req.body?.taskIds) ? req.body.taskIds.map(String) : null;
+  const now = new Date().toISOString();
+  let sent = [];
+  await updateDB((db) => {
+    const tasks = db[slug]?.tasks || [];
+    const targets = tasks.filter((t) =>
+      ids ? ids.includes(t.id) : (t.status === "pending" || t.status === "failed")
+    );
+    for (const t of targets) {
+      t.status = "in-progress";
+      t.statusNote = "";
+      // Which agent has the task — drives the in-progress blink colour on
+      // the card (Claude = orange, Codex = white).
+      t.agent = cliKey;
+      t.sentAt = now;
+      // Fresh ack cycle — the new session must check in on its own.
+      delete t.ackedAt;
+      t.updatedAt = now;
+    }
+    sent = targets.map((t) => ({ ...t }));
+    if (targets.length) {
+      db[slug] = { ...(db[slug] || {}), tasks, updatedAt: now };
+    }
+  });
+  if (!sent.length) return res.status(400).json({ error: "No open tasks to send." });
+
+  try {
+    spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, sent, cfg.port), cliKey);
+    res.json({ ok: true, cli: cliKey, count: sent.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Reorder — body: { order: [taskId, …] } listing EVERY task id in the new
+// order (drag-and-drop on the card). Set-equality is enforced so a stale
+// client can't silently drop tasks.
+app.post("/api/projects/:slug/tasks/reorder", async (req, res) => {
+  const slug = req.params.slug;
+  const ids = Array.isArray(req.body?.order) ? req.body.order.map(String) : null;
+  if (!ids) return res.status(400).json({ error: "order required" });
+  let ok = false;
+  await updateDB((db) => {
+    const tasks = db[slug]?.tasks || [];
+    if (tasks.length !== ids.length) return;
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    if (!ids.every((id) => byId.has(id))) return;
+    db[slug].tasks = ids.map((id) => byId.get(id));
+    db[slug].updatedAt = new Date().toISOString();
+    ok = true;
+  });
+  if (!ok) return res.status(400).json({ error: "order must list every task exactly once" });
+  res.json({ ok: true });
+});
+
+// Restore a just-deleted task (the delete toast's Undo). Body:
+// { task, index? } — the task object the client held onto, reinserted at its
+// old position. Fields are rebuilt from a whitelist so arbitrary shapes
+// never land in the DB. Registered before the :taskId routes so "restore"
+// never parses as a task id.
+app.post("/api/projects/:slug/tasks/restore", async (req, res) => {
+  const slug = req.params.slug;
+  if (!fs.existsSync(fromSlug(slug))) return res.status(404).json({ error: "folder not found" });
+  const t = req.body?.task;
+  if (!t || typeof t !== "object" || typeof t.id !== "string" || typeof t.title !== "string") {
+    return res.status(400).json({ error: "task required" });
+  }
+  const idx = Number.isInteger(req.body?.index) ? req.body.index : -1;
+  const now = new Date().toISOString();
+  const task = {
+    id: t.id,
+    title: flattenTaskText(t.title, 200),
+    note: String(t.note || "").trim().slice(0, 2000),
+    status: TASK_STATUSES.has(t.status) ? t.status : "pending",
+    statusNote: flattenTaskText(t.statusNote, 500),
+    createdAt: typeof t.createdAt === "string" ? t.createdAt : now,
+    updatedAt: now,
+    ...(t.agent === "claude" || t.agent === "codex" ? { agent: t.agent } : {}),
+    ...(typeof t.sentAt === "string" ? { sentAt: t.sentAt } : {}),
+    ...(typeof t.ackedAt === "string" ? { ackedAt: t.ackedAt } : {}),
+    ...(typeof t.reportedAt === "string" ? { reportedAt: t.reportedAt } : {}),
+  };
+  if (!task.title) return res.status(400).json({ error: "task title required" });
+  let ok = false;
+  await updateDB((db) => {
+    const entry = db[slug] || {};
+    entry.tasks = Array.isArray(entry.tasks) ? entry.tasks : [];
+    if (entry.tasks.some((x) => x.id === task.id)) return; // already back
+    const at = idx >= 0 && idx <= entry.tasks.length ? idx : entry.tasks.length;
+    entry.tasks.splice(at, 0, task);
+    entry.updatedAt = now;
+    db[slug] = entry;
+    ok = true;
+  });
+  if (!ok) return res.status(409).json({ error: "task already exists" });
+  res.json({ ok: true, task });
+});
+
+// Delete. POST (not DELETE) to match the rest of the API surface.
+app.post("/api/projects/:slug/tasks/:taskId/delete", async (req, res) => {
+  const { slug, taskId } = req.params;
+  let found = false;
+  await updateDB((db) => {
+    const tasks = db[slug]?.tasks || [];
+    const idx = tasks.findIndex((t) => t.id === taskId);
+    if (idx === -1) return;
+    found = true;
+    tasks.splice(idx, 1);
+    db[slug].updatedAt = new Date().toISOString();
+  });
+  if (!found) return res.status(404).json({ error: "task not found" });
+  res.json({ ok: true });
+});
+
+// Update title / note / status (manual override). Body: { title?, note?, status? }
+app.post("/api/projects/:slug/tasks/:taskId", async (req, res) => {
+  const { slug, taskId } = req.params;
+  const now = new Date().toISOString();
+  let updated = null;
+  await updateDB((db) => {
+    const t = (db[slug]?.tasks || []).find((t) => t.id === taskId);
+    if (!t) return;
+    if (typeof req.body?.title === "string") {
+      const title = flattenTaskText(req.body.title, 200);
+      if (title) t.title = title;
+    }
+    if (typeof req.body?.note === "string") t.note = req.body.note.trim().slice(0, 2000);
+    if (typeof req.body?.status === "string" && TASK_STATUSES.has(req.body.status)) {
+      t.status = req.body.status;
+      // A manual status change supersedes whatever the agent last reported —
+      // clear the note so a stale "failed: …" reason doesn't linger on a task
+      // the user has since flipped back to pending.
+      t.statusNote = "";
+    }
+    t.updatedAt = now;
+    db[slug].updatedAt = now;
+    updated = { ...t };
+  });
+  if (!updated) return res.status(404).json({ error: "task not found" });
+  res.json({ ok: true, task: updated });
+});
+
+// Report callback — run by the AI session itself as its final step (the send
+// prompt embeds the exact curl). Localhost-only by virtue of the server
+// binding 127.0.0.1.
+async function applyTaskReport(res, { slug, taskId, status, note }) {
+  status = String(status || "").toLowerCase().trim();
+  if (!TASK_STATUSES.has(status)) {
+    return res.status(400).json({ error: "status must be one of: " + [...TASK_STATUSES].join(", ") });
+  }
+  const now = new Date().toISOString();
+  let found = false;
+  await updateDB((db) => {
+    const t = (db[slug]?.tasks || []).find((t) => t.id === taskId);
+    if (!t) return;
+    found = true;
+    t.status = status;
+    t.statusNote = flattenTaskText(note, 500);
+    t.reportedAt = now;
+    t.updatedAt = now;
+    db[slug].updatedAt = now;
+  });
+  if (!found) return res.status(404).json({ error: "task not found" });
+  res.json({ ok: true });
+}
+// Pickup acknowledgement — the FIRST thing a spawned session runs. Marks
+// every in-progress task for the project as acknowledged so the staleness
+// sweep knows the session actually started (one command covers a whole
+// batch send).
+app.post("/api/tasks/ack/:slug", async (req, res) => {
+  const slug = req.params.slug;
+  const now = new Date().toISOString();
+  let count = 0;
+  await updateDB((db) => {
+    for (const t of db[slug]?.tasks || []) {
+      if (t.status === "in-progress" && !t.ackedAt) {
+        t.ackedAt = now;
+        t.updatedAt = now;
+        count++;
+      }
+    }
+    if (count) db[slug].updatedAt = now;
+  });
+  res.json({ ok: true, acknowledged: count });
+});
+
+// Path form — what the injected prompt uses: no ? or & to survive cmd.exe.
+// Note rides in the form body via `--data-urlencode "note=…"`.
+app.post("/api/tasks/report/:slug/:taskId/:status", (req, res) =>
+  applyTaskReport(res, {
+    slug: req.params.slug,
+    taskId: req.params.taskId,
+    status: req.params.status,
+    note: req.body?.note,
+  })
+);
+// Query/body form — kept as a forgiving fallback for agents that reshape the
+// command on their own.
+app.post("/api/tasks/report", (req, res) => {
+  const src = { ...(req.body || {}), ...req.query };
+  return applyTaskReport(res, {
+    slug: String(src.slug || ""),
+    taskId: String(src.task || src.taskId || ""),
+    status: src.status,
+    note: src.note,
+  });
 });
 
 // Detached-spawn helper that handles Node 20+'s restriction on running .cmd/.bat
@@ -1145,6 +1603,47 @@ function isCommandOnPath(cmd) {
   }
 }
 
+// Resolve a bare CLI name to its absolute path via `where`. Windows Terminal
+// routes new tabs through an ALREADY-RUNNING WT instance whose environment
+// (PATH) predates this app's — a CLI installed after that WT started (e.g.
+// Claude's native installer dropping claude.exe into ~\.local\bin) resolves
+// fine from the app's own PATH but comes up "'…' is not recognized" inside
+// the spawned tab. Handing the tab an absolute path sidesteps the stale PATH
+// entirely. Prefers .exe over .cmd/.bat (where returns extension-less shell
+// scripts first for npm shims, which cmd can't execute). Explicit paths pass
+// through untouched; unresolvable names fall back unchanged — the pre-flight
+// install gate owns that messaging.
+function resolveCliPath(cmd) {
+  if (!cmd || /[\\/]/.test(cmd)) return cmd;
+  try {
+    const r = spawnSync("where.exe", [cmd], { windowsHide: true, encoding: "utf8" });
+    if (r.status !== 0) return cmd;
+    const lines = String(r.stdout || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    return lines.find((l) => /\.exe$/i.test(l))
+        || lines.find((l) => /\.(cmd|bat)$/i.test(l))
+        || lines[0]
+        || cmd;
+  } catch {
+    return cmd;
+  }
+}
+
+// Quote a CLI path for use at the start of a `cmd /k` line. Paths with
+// spaces need quotes, and `call` keeps cmd from applying its outer-quote
+// stripping heuristic when the line then contains MORE quoted args.
+function cliCommandLine(p) {
+  return /\s/.test(p) ? `call "${p}"` : p;
+}
+
+// Flags that pre-grant permissions so sessions launched from the dashboard
+// run autonomously — task sends, AI publish, and the terminal action buttons
+// all skip per-command approval prompts. The whole point of dispatching work
+// from Coding Drives is hands-off execution.
+const AI_AUTONOMY_FLAGS = {
+  claude: "--permission-mode bypassPermissions",
+  codex: "--dangerously-bypass-approvals-and-sandbox",
+};
+
 app.post("/api/projects/:slug/open", async (req, res) => {
   const cfg = loadConfig();
   const folder = fromSlug(req.params.slug);
@@ -1184,13 +1683,13 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       if (claudeDesktop) {
         await openClaudeDesktop(folder);
       } else {
-        spawnTerminal(folder, cfg.tools.claude || "claude");
+        spawnTerminal(folder, `${cliCommandLine(resolveCliPath(cfg.tools.claude || "claude"))} ${AI_AUTONOMY_FLAGS.claude}`);
       }
     } else if (tool === "codex") {
       if (cfg.openCodexInDesktop === true) {
         spawnCodexDesktop(folder, cfg.tools.codex || "codex");
       } else {
-        spawnTerminal(folder, cfg.tools.codex || "codex");
+        spawnTerminal(folder, `${cliCommandLine(resolveCliPath(cfg.tools.codex || "codex"))} ${AI_AUTONOMY_FLAGS.codex}`);
       }
     } else if (tool === "explorer") {
       // Open the project folder in Windows Explorer. Earlier revisions tried
@@ -2616,7 +3115,7 @@ const PUBLISH_PROMPT =
   "Run `gh repo create {{REPO_NAME}} --{{VISIBILITY}} --source=. --remote=origin --push`. If the repo already exists on my account, add the remote and `git push -u origin HEAD` instead. " +
 
   "PHASE 6 — POLISH THE REPO PAGE. " +
-  "Set description (≤350 chars from the README tagline) with `gh repo edit --description \"<line>\"`. If package.json or pyproject.toml has a homepage, add `--homepage <url>`. Add 5–15 lowercase-with-dashes topics relevant to the stack/frameworks using repeated `--add-topic`. If a version field exists, create the first release with `gh release create v<version> --generate-notes`. " +
+  "Set description (≤350 chars from the README tagline) with `gh repo edit --description <line, quoted for your shell>`. If package.json or pyproject.toml has a homepage, add `--homepage <url>`. Add 5–15 lowercase-with-dashes topics relevant to the stack/frameworks using repeated `--add-topic`. If a version field exists, create the first release with `gh release create v<version> --generate-notes`. " +
 
   "PHASE 7 — REPORT. " +
   "Print a final summary in this exact format on its own lines:\n" +
@@ -2672,7 +3171,7 @@ const RELEASE_PROMPT =
   "Grep the tree for sk-..., sk-ant-..., ghp_..., github_pat_..., AKIA..., xox[bpoars]-, AIza..., PEM headers. STOP if any match. " +
 
   "PHASE 5 — COMMIT, PUSH, TAG. " +
-  "`git add .`, commit with 'Release v<version>', `git push origin HEAD`. Then `gh release create v<version> --title \"v<version>\" --generate-notes`. If you already wrote a CHANGELOG entry, pass it via `--notes-file` instead of --generate-notes. " +
+  "`git add .`, commit with 'Release v<version>', `git push origin HEAD`. Then `gh release create v<version> --title v<version> --generate-notes`. If you already wrote a CHANGELOG entry, pass it via `--notes-file` instead of --generate-notes. " +
 
   "PHASE 6 — REPORT. " +
   "Print on its own lines:\n" +
@@ -2687,10 +3186,36 @@ const RELEASE_PROMPT =
 // shell open with the error visible. cmd's quoting rule for embedded "" is
 // to double them; the prompt template is single-line and uses single quotes
 // internally, so escaping double-quotes is the only thing we need.
-function spawnAiPrompt(folder, cliExecutable, prompt) {
-  const escaped = prompt.replace(/"/g, '""');
-  const cmd = `${cliExecutable} "${escaped}"`;
-  return spawnTerminal(folder, cmd);
+// Launch the AI CLI in a terminal with `prompt` as its initial input. The
+// prompt is written to a temp file and a PowerShell relay inside the tab
+// reads it back and hands it to the CLI as ONE argv string — so multi-line
+// prompts (blank lines, structure) arrive intact and NO prompt content ever
+// touches cmd.exe's parser (quotes/&/parens in prompts used to shatter the
+// argument mid-chain). The relay line itself contains only single quotes,
+// which every layer of the chain passes through verbatim.
+function spawnAiPrompt(folder, cliExecutable, prompt, cliKey) {
+  const exe = resolveCliPath(cliExecutable);
+  // Prune relay files from earlier sends (anything older than an hour).
+  try {
+    for (const f of fs.readdirSync(DATA_DIR)) {
+      if (!/^task-prompt-.*\.txt$/.test(f)) continue;
+      const full = path.join(DATA_DIR, f);
+      try {
+        if (Date.now() - fs.statSync(full).mtimeMs > 60 * 60 * 1000) fs.unlinkSync(full);
+      } catch {}
+    }
+  } catch {}
+  const file = path.join(DATA_DIR, `task-prompt-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.txt`);
+  // BOM so Windows PowerShell 5.1 decodes the file as UTF-8 (em-dashes, emoji).
+  fs.writeFileSync(file, "\uFEFF" + prompt, "utf8");
+  const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  const flags = AI_AUTONOMY_FLAGS[cliKey] || "";
+  const ps = `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
+  return spawn(
+    "cmd.exe",
+    ["/c", "start", "", "wt.exe", "-d", folder, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+    { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+  ).unref();
 }
 
 // POST /api/projects/:slug/github/ai-launch
@@ -2754,7 +3279,7 @@ app.post("/api/projects/:slug/github/ai-launch", async (req, res) => {
     .replace(/\{\{REPO_URL\}\}/g, repoUrl);
 
   try {
-    spawnAiPrompt(folder, cliExecutable, prompt);
+    spawnAiPrompt(folder, cliExecutable, prompt, cliKey);
     res.json({ ok: true, cli: cliKey, repoName, visibility, mode });
   } catch (err) {
     res.status(500).json({ error: err.message || String(err) });
