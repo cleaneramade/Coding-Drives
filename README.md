@@ -111,10 +111,6 @@ The installer ends up at `dist/Coding Drives Setup 1.5.0.exe`.
 - `npm run build:portable` — single-file portable `.exe`
 - `npm run build:dir` — unpacked app folder for fast iteration
 
-### How it works
-
-Coding Drives is a small Electron app. The window loads a local web UI served by an in-process Express server. Project state (status, backup history) is stored as JSON under your `%APPDATA%`. The Open actions launch the right tool in the right folder; backups use Windows' `robocopy`; publishing uses the GitHub CLI.
-
 There's no build step for the renderer — `public/index.html`, `public/app.css`, and `public/app.js` are vanilla and load directly.
 
 ## License
