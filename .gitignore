@@ -2,8 +2,17 @@ node_modules/
 data/
 public/ds/
 dist/
-demo/
-.claude/
 .DS_Store
-Thumbs.db
 *.log
+
+# Rendered demo videos — large binaries, reproducible from demo/src
+demo/out/
+
+# Stray test artifact from an old path bug
+UsersWeedwAppDataLocalTempcdfliptest/
+
+# Per-machine Claude Code permissions
+.claude/settings.local.json
+
+# Runtime lock files
+.claude/scheduled_tasks.lock

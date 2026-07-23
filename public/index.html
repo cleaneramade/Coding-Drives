@@ -38,7 +38,7 @@
     <div class="brand">
       <img class="brand-mark" id="brand-mark" src="/api/logo" alt="" />
       <div class="brand-text">
-        <div class="brand-eyebrow">Project Tracker</div>
+        <div class="brand-eyebrow">Local-first dashboard</div>
         <h1 class="brand-title">Coding Drives</h1>
       </div>
     </div>
@@ -77,6 +77,10 @@
       <button class="btn btn-secondary btn-scan" id="btn-scan" type="button" aria-label="Scan configured folders for new projects">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
         <span>Scan</span>
+      </button>
+      <button class="btn btn-secondary btn-schedule" id="btn-schedule" type="button" aria-label="Scheduled tasks">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5"/><path d="M5 3 2.5 5.5M19 3l2.5 2.5"/></svg>
+        <span>Schedule</span>
       </button>
       <button class="btn btn-secondary btn-settings" id="btn-settings" type="button" aria-label="Settings">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 4.4l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
@@ -201,6 +205,16 @@
             </div>
             <div class="settings-toggle-row">
               <div class="settings-toggle-label">
+                <span class="settings-toggle-title">Headless background terminals</span>
+                <p class="settings-help">Run task &amp; publish sessions hidden in the background — they launch, do the work, then close themselves. No terminal window stays open after the job finishes.</p>
+              </div>
+              <span class="switch">
+                <input type="checkbox" id="set-headless-terminals" aria-label="Headless background terminals" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </span>
+            </div>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-label">
                 <span class="settings-toggle-title">Send tasks with</span>
                 <p class="settings-help">Which coding agent the task send buttons launch.</p>
               </div>
@@ -210,6 +224,21 @@
                 <button type="button" class="gh-vis-opt" data-value="codex" aria-pressed="false">Codex</button>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- Statuses -->
+        <section class="settings-section">
+          <h3 class="settings-title">Statuses</h3>
+          <p class="settings-help">
+            The chips a project can be filed under. Rename or recolor any of them, or add your own.
+            Removing a status moves every project still using it to the first status in the list, so
+            no project is ever left without one.
+          </p>
+          <div id="set-status-list" class="status-edit-list"></div>
+          <div class="modal-input-row">
+            <input id="set-status-add" type="text" placeholder="Status name (e.g., Testing)" autocomplete="off" />
+            <button class="btn btn-brand" id="set-status-confirm" type="button">Add</button>
           </div>
         </section>
 
@@ -416,49 +445,6 @@
     </div>
   </div>
 
-  <!-- ── Publish New Release modal ──────────────────────────────────────── -->
-  <!-- Shown when the popover's "Publish New Release" item is clicked
-       (only present once a project has a github.com origin). Submits to
-       POST /api/projects/:slug/github/release which runs `gh release create`. -->
-  <div class="modal" id="modal-release" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-release-title">
-    <div class="modal-backdrop"></div>
-    <div class="modal-card">
-      <header class="modal-head">
-        <h2 id="modal-release-title">Publish New Release</h2>
-        <button class="icon-btn modal-close" aria-label="Close" type="button">
-          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
-        </button>
-      </header>
-      <div class="modal-body">
-        <p class="modal-help" id="rel-target"></p>
-        <label class="gh-field">
-          <span class="gh-field-label">Tag</span>
-          <input id="rel-tag" type="text" placeholder="v1.0.1" autocomplete="off" />
-        </label>
-        <label class="gh-field">
-          <span class="gh-field-label">Title <span class="gh-field-hint">(optional)</span></span>
-          <input id="rel-title" type="text" placeholder="Defaults to tag" autocomplete="off" />
-        </label>
-        <label class="gh-checkbox">
-          <input type="checkbox" id="rel-auto" checked />
-          <span>Auto-generate notes from commits</span>
-        </label>
-        <label class="gh-field" id="rel-notes-wrap" hidden>
-          <span class="gh-field-label">Release notes</span>
-          <textarea id="rel-notes" rows="6" placeholder="Markdown supported"></textarea>
-        </label>
-        <div class="modal-error" id="rel-error"></div>
-      </div>
-      <footer class="modal-foot">
-        <div class="modal-foot-row">
-          <div class="grow"></div>
-          <button class="btn btn-ghost modal-close" type="button">Cancel</button>
-          <button class="btn btn-brand" id="rel-submit" type="button">Create release</button>
-        </div>
-      </footer>
-    </div>
-  </div>
-
   <!-- ── Card template ─────────────────────────────────────────────────── -->
   <template id="card-template">
     <article class="card" data-slug="">
@@ -466,6 +452,16 @@
         <div class="card-title-row">
           <h2 class="card-title"></h2>
           <div class="card-title-actions">
+            <!-- Active-session badge — shown when this project has AI tasks
+                 running in background terminals. Sits at the LEFT of the
+                 icon-button cluster (just before the task-toggle), on the
+                 opposite side from the project name. Clicking it opens the
+                 running session terminals so the user can watch them. Hidden
+                 while idle. Populated per-card in buildCard() (app.js). -->
+            <button class="card-session-badge" type="button" hidden>
+              <span class="session-dot" aria-hidden="true"></span>
+              <span class="card-session-text"></span>
+            </button>
             <button class="icon-btn task-toggle" aria-label="Show tasks" aria-pressed="false" type="button">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7 2 2 4-4"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>
             </button>
@@ -512,18 +508,27 @@
         <div class="card-tasks-head">
           <span class="label">Tasks</span>
           <span class="task-count" hidden></span>
-          <button class="task-send-all" type="button" hidden>
-            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-            <span>Send all</span>
-          </button>
+          <!-- Right-aligned action cluster. Order is "Send all", then the
+               quick-add "Add task" button, then the "+N more / Show less"
+               expander — so Add task sits directly to the LEFT of Show more.
+               The wrapper carries the margin-left:auto so individual buttons
+               toggling hidden never leaves a stale gap. -->
+          <div class="task-head-actions">
+            <button class="task-send-all" type="button" hidden>
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+              <span>Send all</span>
+            </button>
+            <button class="task-add-btn" type="button">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>Add task</span>
+            </button>
+            <button class="task-more" type="button" hidden></button>
+          </div>
         </div>
         <ul class="task-list" role="list"></ul>
-        <button class="task-more" type="button" hidden></button>
+        <!-- Inline quick-add input. Clicking "Add task" (now up in the head)
+             hides that button and reveals this full-width row in its place. -->
         <div class="task-add">
-          <button class="task-add-btn" type="button">
-            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-            <span>Add task</span>
-          </button>
           <input class="task-add-input" type="text" placeholder="Describe the task…" maxlength="200" autocomplete="off" spellcheck="false" hidden />
         </div>
       </div>
@@ -668,6 +673,39 @@
           <span class="gh-field-label">Description <span class="gh-field-hint">(sent to the agent with the task)</span></span>
           <textarea id="task-edit-note" maxlength="2000" placeholder="What to consider, what you're looking for, how you want it done…"></textarea>
         </label>
+        <!-- Reference links — added one at a time the same way scan/backup
+             paths are: paste a URL, click Add (or hit Enter), and it becomes a
+             removable chip. Keeps the field short and lets the user stack up
+             several links. Pasting multiple URLs at once adds each. -->
+        <div class="gh-field">
+          <span class="gh-field-label">Reference links <span class="gh-field-hint">(optional — paste a URL and Add; multiple allowed)</span></span>
+          <div class="path-list reflink-list" id="task-edit-links-list"></div>
+          <div class="modal-input-row">
+            <input id="task-edit-links-input" type="text" placeholder="https://example.com/design-spec" autocomplete="off" spellcheck="false" />
+            <button class="btn btn-brand" id="task-edit-links-add" type="button">Add</button>
+          </div>
+        </div>
+        <!-- Reference image — attached to the task and saved to disk so the
+             spawned agent (Claude Code / Codex) can read it by path. Picking a
+             file uploads it immediately, OR paste an image with Ctrl+V anywhere
+             in this dialog; the preview + Remove appear once set. -->
+        <div class="gh-field task-edit-image-field">
+          <span class="gh-field-label">Reference image <span class="gh-field-hint">(attach a file or paste an image with Ctrl+V)</span></span>
+          <input id="task-edit-image-input" type="file" accept="image/*" hidden />
+          <div class="task-image-empty" id="task-image-empty">
+            <button class="btn btn-ghost task-image-attach" id="task-image-attach" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+              <span>Attach image</span>
+            </button>
+          </div>
+          <div class="task-image-preview" id="task-image-preview" hidden>
+            <img id="task-image-thumb" alt="Reference image preview" />
+            <div class="task-image-meta">
+              <span class="task-image-name" id="task-image-name"></span>
+              <button class="btn btn-ghost task-image-remove" id="task-image-remove" type="button">Remove</button>
+            </div>
+          </div>
+        </div>
         <p class="modal-help task-edit-report" id="task-edit-report" hidden></p>
       </div>
       <footer class="modal-foot">
@@ -676,6 +714,144 @@
           <div class="grow"></div>
           <button class="btn btn-ghost modal-close" type="button">Cancel</button>
           <button class="btn btn-brand" id="task-edit-save" type="button">Save</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ── Scheduled tasks modal ─────────────────────────────────────────── -->
+  <!-- Manage recurring / one-off tasks. The list shows every saved schedule;
+       the form below it creates a new one or edits the selected one. A fired
+       schedule materialises a real task on the chosen project (so it appears on
+       the card and reports back like any other task). -->
+  <div class="modal modal-lg" id="modal-schedule" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-schedule-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="modal-schedule-title">Scheduled Tasks</h2>
+        <button class="icon-btn modal-close" aria-label="Close" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+        </button>
+      </header>
+      <div class="modal-body schedule-body">
+        <section class="schedule-list-section">
+          <div class="schedule-list-head">
+            <span class="settings-title">Your schedules<span class="schedule-count" id="sched-count" hidden>0</span></span>
+            <button class="btn btn-ghost btn-sm" id="sched-new" type="button">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>New</span>
+            </button>
+          </div>
+          <div class="schedule-list" id="schedule-list"></div>
+          <div class="schedule-empty" id="schedule-empty" hidden>No scheduled tasks yet. Create one below.</div>
+        </section>
+
+        <div class="schedule-divider" role="separator" aria-hidden="true"></div>
+
+        <section class="schedule-form" id="schedule-form">
+          <div class="schedule-form-head">
+            <span class="settings-title" id="sched-form-title">New scheduled task</span>
+            <button class="btn btn-ghost btn-sm" id="sched-cancel-edit" type="button" hidden>Cancel edit</button>
+          </div>
+
+          <div class="gh-field">
+            <span class="gh-field-label">Projects <span class="gh-field-hint">(the task runs in every selected project's folder)</span></span>
+            <div class="path-list reflink-list" id="sched-projects-list"></div>
+            <div class="modal-input-row">
+              <select id="sched-project" class="cd-select"></select>
+              <button class="btn btn-brand" id="sched-project-add" type="button">Add</button>
+            </div>
+          </div>
+
+          <label class="gh-field">
+            <span class="gh-field-label">Task name</span>
+            <input id="sched-title" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="e.g. Run the nightly dependency audit" />
+          </label>
+
+          <label class="gh-field">
+            <span class="gh-field-label">Description <span class="gh-field-hint">(prompt sent to the agent)</span></span>
+            <textarea id="sched-note" maxlength="2000" placeholder="What to do, what to consider, how you want it done…"></textarea>
+          </label>
+
+          <div class="gh-field">
+            <span class="gh-field-label">Reference links <span class="gh-field-hint">(optional — paste a URL and Add; multiple allowed)</span></span>
+            <div class="path-list reflink-list" id="sched-links-list"></div>
+            <div class="modal-input-row">
+              <input id="sched-links-input" type="text" placeholder="https://example.com/spec" autocomplete="off" spellcheck="false" />
+              <button class="btn btn-brand" id="sched-links-add" type="button">Add</button>
+            </div>
+          </div>
+
+          <div class="schedule-when">
+            <label class="gh-field">
+              <span class="gh-field-label">Repeat</span>
+              <select id="sched-recurrence" class="cd-select">
+                <option value="once">Once</option>
+                <option value="daily" selected>Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </label>
+
+            <label class="gh-field sched-when-field" id="sched-field-datetime" hidden>
+              <span class="gh-field-label">Date &amp; time</span>
+              <input id="sched-datetime" type="datetime-local" class="cd-input" />
+            </label>
+
+            <label class="gh-field sched-when-field" id="sched-field-time">
+              <span class="gh-field-label">Time</span>
+              <input id="sched-time" type="time" class="cd-input" value="09:00" />
+            </label>
+
+            <label class="gh-field sched-when-field" id="sched-field-weekday" hidden>
+              <span class="gh-field-label">Day of week</span>
+              <select id="sched-weekday" class="cd-select">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+            </label>
+
+            <label class="gh-field sched-when-field" id="sched-field-day" hidden>
+              <span class="gh-field-label">Day of month</span>
+              <select id="sched-day" class="cd-select"></select>
+            </label>
+
+            <label class="gh-field sched-when-field">
+              <span class="gh-field-label">Agent</span>
+              <select id="sched-agent" class="cd-select">
+                <option value="">Default (Settings)</option>
+                <option value="claude">Claude</option>
+                <option value="codex">Codex</option>
+              </select>
+            </label>
+          </div>
+
+          <p class="schedule-next-hint" id="sched-next-hint"></p>
+          <div class="modal-error" id="sched-error"></div>
+        </section>
+
+        <div class="schedule-important" role="note">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/></svg>
+          <p>
+            <strong>Important:</strong> scheduled tasks only fire while this PC is on.
+            Closing the window keeps Coding Drives running in the background (system tray),
+            so schedules still fire on time — use the tray icon's <em>Quit</em> to stop it
+            completely. If the PC was off or the app fully quit when a run was due, the task
+            fires the moment Coding Drives next starts. Times follow this device's clock and
+            timezone<span id="sched-tz"></span>.
+          </p>
+        </div>
+      </div>
+      <footer class="modal-foot">
+        <div class="modal-foot-row">
+          <button class="btn btn-ghost modal-close" type="button">Close</button>
+          <div class="grow"></div>
+          <button class="btn btn-brand" id="sched-save" type="button">Add schedule</button>
         </div>
       </footer>
     </div>

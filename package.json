@@ -1,7 +1,7 @@
 {
   "name": "coding-drives",
   "productName": "Coding Drives",
-  "version": "1.5.0",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
   "description": "See every coding project on your PC in one dashboard. Open them in VS Code, Claude Code, or Codex, back them up safely, and publish to GitHub.",
@@ -31,11 +31,14 @@
   ],
   "main": "electron.cjs",
   "scripts": {
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "server": "node server.js",
     "dev": "electron .",
     "icon": "node scripts/build-icon.mjs",
     "prebuild": "node scripts/build-icon.mjs",
     "build": "electron-builder --win nsis --x64",
+    "postbuild": "node scripts/clean-dist.mjs",
+    "clean:dist": "node scripts/clean-dist.mjs",
     "build:portable": "electron-builder --win portable --x64",
     "build:dir": "electron-builder --dir --win --x64"
   },
@@ -70,7 +73,12 @@
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "Coding Drives Setup ${version}.exe"
     },

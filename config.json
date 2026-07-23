@@ -1,11 +1,6 @@
 {
   "scanPaths": [],
-  "excludeFolders": [
-    ".git",
-    ".vscode",
-    ".idea",
-    "node_modules"
-  ],
+  "excludeFolders": [".git", ".vscode", ".idea", "node_modules"],
   "backupPath": "",
   "designSystemCss": "",
   "extraProjectPaths": [],

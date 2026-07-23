@@ -3,6 +3,13 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 
+/* The card grid is torn down and rebuilt wholesale on every task poll, which
+   destroys whatever node Chromium picked as its scroll anchor. Left enabled,
+   scroll anchoring then "corrects" the viewport against the replaced content
+   — one of the causes of the scroll position jumping while reading. The
+   repaint already preserves the scroll position itself (renderGrid). */
+html { overflow-anchor: none; }
+
 /* The HTML `hidden` attribute must always win over later display rules.
    Without this, elements like .modal (which set display:flex/inline-flex)
    would override [hidden] and show on load. */
@@ -534,6 +541,58 @@ body {
   gap: 8px;
   margin-left: auto;
   flex-shrink: 0;
+  align-items: center;
+}
+
+/* Active-session badge — sits at the LEFT edge of a project card's icon-button
+   cluster (just before the task-toggle), opposite the project name, showing how
+   many AI sessions are running in background terminals for that project. Same
+   translucent-success pill language as the KPI tiles, with a soft pulsing dot to
+   read as "live". It's a button: clicking it opens the running session
+   terminals so the user can watch them. Hidden (display:none via [hidden])
+   while the project is idle. */
+.card-session-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  /* Match the icon-button height (28px) exactly so the badge lines up flush
+     with the task-toggle / explorer / menu squares it sits beside. box-sizing
+     is border-box globally, so the 1px border is included in the 28px. */
+  height: 28px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-snug);
+  white-space: nowrap;
+  color: var(--success);
+  background: var(--success-soft);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: filter var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+}
+.card-session-badge[hidden] { display: none; }
+.card-session-badge:hover { filter: brightness(1.12); }
+.card-session-badge:active { transform: translateY(1px); }
+.card-session-badge:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.session-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
+  animation: session-pulse 1.8s ease-out infinite;
+}
+@keyframes session-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-dot { animation: none; }
 }
 
 /* Filter-row CTAs visually match the chip pills (same height, font, radius)
@@ -614,7 +673,7 @@ body {
 .card-title-row {
   display: flex; align-items: center; gap: 8px; justify-content: space-between;
 }
-.card-title-actions { display: inline-flex; gap: 6px; }
+.card-title-actions { display: inline-flex; gap: 6px; align-items: center; }
 .card-title {
   font-family: var(--font-display);
   font-weight: 700;
@@ -889,8 +948,14 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   border: 1px solid var(--brand-500);
   color: var(--brand-300);
 }
-.task-send-all {
+/* Right-aligned cluster holding Send all · Add task · Show more. The wrapper
+   owns the margin-left:auto so any of the three toggling [hidden] never leaves
+   a dangling gap mid-row. */
+.task-head-actions {
   margin-left: auto;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.task-send-all {
   display: inline-flex; align-items: center; gap: 5px;
   font: inherit; font-size: 11px; font-weight: 600;
   color: var(--brand-300);
@@ -1010,24 +1075,43 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
    original dims while the others FLIP around it. */
 .card.card-dragging { opacity: 0.5; }
 
+/* Lives in .task-head-actions, last in the right-aligned cluster (so it sits
+   to the RIGHT of the Add task button). Pill toggle in the same idiom as
+   .task-send-all; .expanded lights it violet and flips the chevron. */
 .task-more {
-  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 5px;
+  white-space: nowrap;
   font: inherit; font-size: 11px; font-weight: 600;
   color: var(--fg-3);
-  background: transparent; border: 0; padding: 0 2px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
   cursor: pointer;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
 }
-.task-more:hover { color: var(--fg-1); }
+.task-more svg { transition: transform var(--dur) var(--ease-out); }
+.task-more:hover { color: var(--fg-1); background: var(--tile-violet-bg); border-color: var(--brand-500); }
+.task-more.expanded { color: var(--brand-300); background: var(--tile-violet-bg); border-color: var(--brand-500); }
+.task-more.expanded svg { transform: rotate(180deg); }
 
 .task-add { display: flex; }
+/* The Add task trigger now lives up in the head; this container holds only the
+   inline quick-add input, so collapse it whenever that input is hidden — no
+   stray gap below the task list when not adding. */
+.task-add:not(:has(.task-add-input:not([hidden]))) { display: none; }
+/* Quick-add trigger — now sits in the head cluster between Send all and Show
+   more, so it wears the same compact pill footprint as its neighbours while
+   keeping its dashed "add" outline. */
 .task-add-btn {
   display: inline-flex; align-items: center; gap: 5px;
+  white-space: nowrap;
   font: inherit; font-size: 11px; font-weight: 600;
   color: var(--fg-3);
   background: transparent;
   border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
   cursor: pointer;
   transition: color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
 }
@@ -1057,6 +1141,42 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   min-height: 0;
   overflow-y: auto;
 }
+
+/* Reference image — attach control + thumbnail preview, both inside a
+   .gh-field so they line up with the text fields above. */
+.task-edit-image-field { display: flex; flex-direction: column; gap: 8px; }
+.task-image-attach,
+.task-image-remove {
+  display: inline-flex; align-items: center; gap: 6px;
+  align-self: flex-start;
+  font-size: 12px;
+}
+.task-image-preview {
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.task-image-preview[hidden] { display: none; }
+#task-image-thumb {
+  width: 96px; height: 96px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.task-image-meta {
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0;
+}
+.task-image-name {
+  font-size: 12px; color: var(--fg-3);
+  word-break: break-all;
+}
+.task-image-remove { color: var(--danger); }
+.task-image-remove:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .task-edit-delete { color: var(--danger); }
 /* Hover goes properly red — soft danger fill instead of the generic ghost
    gray, so the destructive action reads as destructive. */
@@ -1777,6 +1897,56 @@ body:has(.modal.is-open) { overflow: hidden; }
   font-size: 12px;
   color: var(--fg-2);
 }
+
+/* Status editor — one row per status (swatch, name, color, remove). These stack
+   vertically rather than wrapping like the path/exclude pills above: each row
+   carries three controls and needs the full width to stay legible. */
+.status-edit-list {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 10px;
+}
+.status-edit-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 4px 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.status-edit-row input,
+.status-edit-row select {
+  font: inherit; font-size: 12px;
+  color: var(--fg-1);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  outline: none;
+  transition: border-color var(--dur) var(--ease-out);
+}
+.status-edit-row input { flex: 1; min-width: 0; }
+.status-edit-row select { flex: none; cursor: pointer; }
+.status-edit-row input:focus,
+.status-edit-row select:focus { border-color: rgba(255,255,255,0.18); }
+/* Previews the color the chip will actually use, so the row reads as the thing
+   it configures rather than as a dropdown value. */
+.status-swatch {
+  width: 12px; height: 12px; border-radius: 50%;
+  flex: none;
+  border: 1px solid rgba(255,255,255,0.14);
+}
+.status-edit-row .remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  padding: 0; background: transparent; border: 0;
+  color: var(--fg-3); cursor: pointer;
+  border-radius: 50%;
+  flex: none;
+}
+.status-edit-row .remove:hover { color: var(--danger); background: rgba(248,113,113,0.10); }
+/* Disabled on the last remaining status — an empty list would leave the filter
+   row with no chips and no way to add one back. */
+.status-edit-row .remove:disabled { opacity: 0.3; cursor: not-allowed; }
+.status-edit-row .remove:disabled:hover { color: var(--fg-3); background: transparent; }
 /* Path text — truncate with an ellipsis (full path on hover via title) so a
    long path becomes a tidy pill instead of stretching the whole row. */
 .path-item > span:first-child {
@@ -1956,4 +2126,206 @@ body:has(.modal.is-open) { overflow: hidden; }
   background: var(--border);
   pointer-events: none;
 }
+
+/* ── Scheduled tasks modal ──────────────────────────────────────────────── */
+/* Small button variant used for the schedule row actions + form affordances. */
+.btn-sm { padding: 6px 10px; font-size: 12px; gap: 5px; }
+
+/* Native form controls styled to match .gh-field inputs/textarea exactly so
+   every modal (Settings, Edit task, Schedule) reads as one consistent system —
+   same radius, padding, font, focus treatment. Selects drop the OS chevron
+   (appearance:none) for a custom hairline chevron drawn as a background SVG,
+   so dropdowns match the dark UI instead of showing a stock light-themed arrow.
+   .gh-field select is included so a <select> dropped into any gh-field inherits
+   the same look without needing the cd-select class. */
+.cd-select,
+.cd-input,
+.gh-field select {
+  width: 100%;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.cd-select,
+.gh-field select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a0a0ab' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+}
+.cd-select option,
+.gh-field select option { background: var(--surface-2); color: var(--fg-1); }
+.cd-select:focus,
+.cd-input:focus,
+.gh-field select:focus { border-color: rgba(255,255,255,0.18); background-color: var(--surface-3); }
+.cd-input::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
+
+/* Reference-link chip editor (Edit task / Schedule). Reuses the .path-list /
+   .path-item pills so adding links reads exactly like adding scan paths. Tighten
+   the inherited bottom margin (the parent .gh-field already spaces the rows) and
+   hide the list entirely until the first link is added. */
+.reflink-list { margin-bottom: 0; }
+.reflink-list:empty { display: none; }
+.reflink-list .path-item { max-width: 100%; }
+.reflink-list .path-item > span:first-child { font-size: 12px; }
+
+/* ── Scheduled tasks modal ─────────────────────────────────────────────────
+   Roomier than the stock modal-lg: the form's timing grid and the list rows
+   both breathe better with the extra width. */
+#modal-schedule .modal-card { width: min(780px, 100%); }
+
+/* THE scroll container. .modal-card is overflow:hidden (rounded corners), so
+   without this the schedule content past the first viewport-height was simply
+   unreachable. flex:1 + min-height:0 lets the body take the remaining card
+   height and scroll inside it, with head/foot staying pinned. */
+.schedule-body {
+  display: flex; flex-direction: column; gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.schedule-list-section { display: flex; flex-direction: column; gap: 10px; }
+.schedule-list-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+/* Count pill beside "Your schedules" — quick read of how many exist. */
+.schedule-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  margin-left: 6px;
+  font-size: 11px; font-weight: 700;
+  color: var(--brand-500);
+  background: color-mix(in srgb, var(--brand-500) 14%, transparent);
+  border-radius: 999px;
+}
+.schedule-list { display: flex; flex-direction: column; gap: 8px; }
+.schedule-empty {
+  color: var(--fg-3); font-size: 13px;
+  padding: 18px 14px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+
+.schedule-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 120ms var(--ease-out), background 120ms var(--ease-out);
+}
+.schedule-row:hover { border-color: var(--ring); background: var(--surface-3); }
+.schedule-row[data-disabled="true"] { opacity: 0.6; }
+
+/* Status dot — live green (breathing), paused gray, last-run-failed red.
+   Aligned to the title's first line, not row-centered, so tall rows read right. */
+.schedule-row-dot {
+  flex: none;
+  width: 8px; height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--fg-3);
+}
+.schedule-row-dot[data-state="on"] {
+  background: var(--ok, #34d399);
+  animation: sched-dot-breathe 2.4s ease-in-out infinite;
+}
+.schedule-row-dot[data-state="error"] { background: var(--danger); }
+@keyframes sched-dot-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok, #34d399) 35%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok, #34d399) 12%, transparent); }
+}
+
+.schedule-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.schedule-row-title {
+  font-size: 13px; font-weight: 600; color: var(--fg-1);
+  display: flex; align-items: center; gap: 8px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.schedule-row-warn {
+  flex: none;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--danger); border: 1px solid var(--danger);
+  border-radius: 999px; padding: 1px 7px;
+}
+.schedule-row-meta {
+  font-size: 12px; color: var(--fg-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.schedule-row-sub { font-size: 12px; color: var(--fg-3); }
+.schedule-row-error { color: var(--danger); }
+.schedule-row-actions {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.schedule-row-del:hover { color: var(--danger); border-color: var(--danger); }
+
+.schedule-divider { height: 1px; background: var(--border); flex: none; }
+
+/* The editor sits in its own softly-tinted card so "browse the list" and
+   "build a schedule" read as two distinct zones instead of one long form. */
+.schedule-form {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--surface-2) 45%, transparent);
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: var(--radius-lg);
+}
+.schedule-form-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+/* Timing controls share a responsive row that wraps on narrow widths. */
+.schedule-when {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+/* "Runs: every day at 09:00" — a quiet brand-tinted pill so the schedule's
+   plain-English translation stands out from the field labels around it. */
+.schedule-next-hint {
+  align-self: flex-start;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 12px; color: color-mix(in srgb, var(--brand-500) 60%, var(--fg-1));
+  background: color-mix(in srgb, var(--brand-500) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand-500) 26%, var(--border));
+  border-radius: 999px;
+}
+
+/* Bottom-of-modal caveat — the one thing every schedule user must know:
+   nothing fires while the PC is off. Amber-tinted note card so it reads as
+   "heads-up", distinct from the red .modal-error right above it. */
+.schedule-important {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex: none;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, #f5b45c 34%, var(--border));
+  border-left: 3px solid #f5b45c;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, #f5b45c 7%, var(--surface-2));
+}
+.schedule-important svg { color: #f5b45c; flex: none; margin-top: 1px; }
+.schedule-important p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--fg-2); }
+.schedule-important strong { color: var(--fg-1); }
+.schedule-important em { font-style: normal; color: var(--fg-1); }
+
+/* The multi-project picker's select shares the input row with its Add button —
+   let it stretch like the link input does. */
+.modal-input-row .cd-select { flex: 1; min-width: 0; }
 

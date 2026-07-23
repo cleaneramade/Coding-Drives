@@ -5,6 +5,7 @@ import express from "express";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -15,12 +16,29 @@ const DATA_DIR    = process.env.PT_DATA_DIR   || path.join(__dirname, "data");
 const PUBLIC_DIR  = path.join(__dirname, "public");
 const ASSETS_DIR  = path.join(__dirname, "assets");
 const DS_OUT_DIR  = process.env.PT_DS_DIR     || path.join(PUBLIC_DIR, "ds");
-const CONFIG_PATH = path.join(__dirname, "config.json");
+// PT_CONFIG_PATH points at a different bundled-defaults file. Only the
+// update-survival test sets it — it needs to stand in a "next version" whose
+// defaults differ, without touching the real config.json in the working tree.
+const CONFIG_PATH = process.env.PT_CONFIG_PATH || path.join(__dirname, "config.json");
 const PROJECTS_DB = path.join(DATA_DIR, "projects.json");
+// Scheduled tasks — recurring/one-off templates that fire concrete tasks onto
+// projects. Its own file (parallel serialized queue) keeps the scheduler's
+// frequent nextRunAt writes off the main projects.json contention path.
+const SCHEDULES_DB = path.join(DATA_DIR, "schedules.json");
+// Reference images attached to tasks live here, one file per task (named by
+// task id). The spawned AI session reads them by absolute path.
+const TASK_IMAGES_DIR = path.join(DATA_DIR, "task-images");
 const DS_OUT_FILE = path.join(DS_OUT_DIR, "colors_and_type.css");
 const USER_CONFIG_PATH = path.join(DATA_DIR, "user-config.json");
 
 // ─── Config (bundled defaults + user overrides) ─────────────────────────────
+// INVARIANT: config.json ships inside the install directory, which the NSIS
+// installer wipes and replaces on every update. It therefore holds DEFAULTS
+// ONLY — never user state, never an absolute path off this machine. Anything a
+// user can change belongs in user-config.json under userData, which no install
+// or uninstall touches. Put user state here and it silently reverts on the next
+// version bump, for every user. See tests/update-survival.test.mjs, which fails
+// if this invariant is broken.
 function loadBundledConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
 }
@@ -28,6 +46,22 @@ function loadUserConfig() {
   try { return JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")); }
   catch { return {}; }
 }
+// A usable status list needs at least one entry, and every entry needs a
+// string id + label. Anything else (hand-edited user-config, a half-written
+// file, a future shape change) falls back to the bundled defaults rather than
+// booting into a filter row with no chips and no way back.
+function isValidStatusList(list) {
+  if (!Array.isArray(list) || list.length === 0) return false;
+  const ids = new Set();
+  for (const s of list) {
+    if (!s || typeof s.id !== "string" || !s.id.trim()) return false;
+    if (typeof s.label !== "string" || !s.label.trim()) return false;
+    if (ids.has(s.id)) return false;   // duplicate ids would alias in the filter
+    ids.add(s.id);
+  }
+  return true;
+}
+
 function loadConfig() {
   const base = loadBundledConfig();
   const user = loadUserConfig();
@@ -38,8 +72,18 @@ function loadConfig() {
     ...(base.extraProjectPaths || []),
     ...(user.extraProjectPaths || []),
   ]));
-  // Apply per-status overrides (label / color hex) on top of bundled statuses.
-  if (user.statusOverrides && Array.isArray(cfg.statuses)) {
+  // Statuses. The shallow merge above already lets user-config carry a complete
+  // replacement list (Settings → Statuses writes one) — this just makes that
+  // explicit and refuses an unusable list.
+  if (!isValidStatusList(cfg.statuses)) cfg.statuses = base.statuses;
+  // statusOverrides predates the editable list — it patched label/color of the
+  // bundled ids back when that was the only way to customise them. Apply it
+  // ONLY when the user has no explicit list, so pre-existing tweaks still show
+  // for anyone who never opened the new screen. Once a list is saved it IS the
+  // source of truth: re-applying overrides on top would silently revert the
+  // user's own edit (rename "Done"→"Finished", boot, and an old override
+  // renaming it "Complete" would win).
+  if (!isValidStatusList(user.statuses) && user.statusOverrides && Array.isArray(cfg.statuses)) {
     cfg.statuses = cfg.statuses.map((s) => {
       const o = user.statusOverrides[s.id];
       return o ? { ...s, ...(o.label ? { label: o.label } : {}), ...(o.color ? { color: o.color } : {}) } : s;
@@ -53,11 +97,26 @@ function defaultBackupPath() {
   const home = process.env.USERPROFILE || process.env.HOME || "";
   return path.join(home, "Documents", "Coding Drives Backups");
 }
-async function saveUserConfig(patch) {
-  const next = { ...loadUserConfig(), ...patch };
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  await fsp.writeFile(USER_CONFIG_PATH, JSON.stringify(next, null, 2));
+// Serialized read-merge-write for user-config.json — same reasoning as
+// updateDB below. Concurrent writers are real (Settings save, card reorder,
+// the projects fetch registering new arrivals in projectOrders): without the
+// queue two callers read the same base object and the last write silently
+// drops the other's change. `mutate` receives the freshest on-disk config and
+// returns the object to persist.
+let _userCfgQueue = Promise.resolve();
+function updateUserConfig(mutate) {
+  const next = _userCfgQueue.then(async () => {
+    const merged = await mutate(loadUserConfig());
+    await fsp.mkdir(DATA_DIR, { recursive: true });
+    await fsp.writeFile(USER_CONFIG_PATH, JSON.stringify(merged, null, 2));
+    return merged;
+  });
+  // Keep the chain alive even if one write fails.
+  _userCfgQueue = next.catch(() => {});
   return next;
+}
+function saveUserConfig(patch) {
+  return updateUserConfig((cur) => ({ ...cur, ...patch }));
 }
 
 // ─── Shared exclusion lists ─────────────────────────────────────────────────
@@ -97,27 +156,103 @@ async function ensureDataDir() {
   if (!fs.existsSync(PROJECTS_DB)) await fsp.writeFile(PROJECTS_DB, "{}");
 }
 
-// One-shot migration for status renames so existing entries don't end up in
-// a status that's no longer in the statuses list (which would orphan them
-// from the filter UI). Runs every boot — idempotent.
+// ─── Schema version + migrations ────────────────────────────────────────────
+// The version lives in a sidecar (data/schema.json), deliberately NOT inside
+// projects.json. projects.json is a bare slug→project map that several call
+// sites iterate with Object.keys(); wrapping it in a { schemaVersion, projects }
+// envelope would mean any older build reading this data back sees the envelope
+// keys as project slugs. Users do roll back. A sidecar keeps projects.json
+// readable by every past and future build — old builds just ignore a file they
+// don't know about.
+//
+// Version 0 = data written before this framework existed (no sidecar).
+const SCHEMA_PATH = path.join(DATA_DIR, "schema.json");
+const SCHEMA_VERSION = 1;
+
+// Status ids renamed across versions. Adding an entry here is NOT enough to
+// make it run — migrations are version-gated and run once, not every boot, so
+// a new rename also needs a MIGRATIONS entry and a SCHEMA_VERSION bump.
 const STATUS_MIGRATIONS = {
   idea:    "in-progress",   // "Idea" was removed; default is now In Progress
   paused:  "on-hold",       // "Paused" renamed to "On Hold"
 };
-async function migrateStatusDB() {
+
+// Ordered by `to`. Each run(db) mutates the bare map in place and returns
+// whether it changed anything. Every migration must be safe to re-run: a crash
+// between writeDB() and writeSchemaVersion() replays it on the next boot.
+const MIGRATIONS = [
+  {
+    to: 1,
+    name: "rename legacy status ids",
+    run(db) {
+      let changed = false;
+      for (const slug of Object.keys(db)) {
+        const cur = db[slug]?.status;
+        if (cur && STATUS_MIGRATIONS[cur]) {
+          db[slug].status = STATUS_MIGRATIONS[cur];
+          changed = true;
+        }
+      }
+      return changed;
+    },
+  },
+];
+
+function readSchemaVersion() {
+  try { return JSON.parse(fs.readFileSync(SCHEMA_PATH, "utf8")).projects ?? 0; }
+  catch { return 0; }   // no sidecar = pre-framework data
+}
+async function writeSchemaVersion(v) {
+  await ensureDataDir();
+  await fsp.writeFile(SCHEMA_PATH, JSON.stringify({ projects: v }, null, 2));
+}
+// Deleting a status from Settings → Statuses strands every project still
+// sitting in it: the id matches no chip, so those projects disappear from the
+// filter row entirely. Move them to `fallback` (the first remaining status)
+// so a delete can never lose track of a project. Returns how many moved.
+async function reassignOrphanedStatuses(statuses) {
+  const valid = new Set(statuses.map((s) => s.id));
+  const fallback = statuses[0].id;
+  let moved = 0;
+  // Through updateDB, NOT a raw readDB→writeDB: this is a full-DB
+  // read-modify-write, and running it outside the serialized queue could
+  // write back a stale snapshot over a status flip / task change / staleness
+  // sweep landing concurrently — silently reverting that other write.
+  await updateDB((db) => {
+    for (const slug of Object.keys(db)) {
+      const cur = db[slug]?.status;
+      if (cur && !valid.has(cur)) {
+        db[slug].status = fallback;
+        moved++;
+      }
+    }
+  });
+  if (moved) {
+    console.log(`[statuses] moved ${moved} project(s) to "${fallback}" after a status was removed`);
+  }
+  return moved;
+}
+
+// Runs on boot, before the server listens. Data written by an OLDER build gets
+// upgraded here. Data written by a NEWER build is left alone rather than
+// downgraded — rewriting fields this build doesn't understand would drop them.
+async function migrateDB() {
+  const from = readSchemaVersion();
+  if (from >= SCHEMA_VERSION) return;
+
   const db = await readDB();
   let changed = false;
-  for (const slug of Object.keys(db)) {
-    const cur = db[slug]?.status;
-    if (cur && STATUS_MIGRATIONS[cur]) {
-      db[slug].status = STATUS_MIGRATIONS[cur];
-      changed = true;
-    }
+  for (const m of MIGRATIONS) {
+    if (m.to <= from) continue;
+    const did = await m.run(db);
+    if (did) changed = true;
+    console.log(`[migrate] v${from} → v${m.to}: ${m.name}${did ? "" : " (nothing to do)"}`);
   }
-  if (changed) {
-    await writeDB(db);
-    console.log("[migrate] updated stored statuses to new IDs");
-  }
+  // Data first, stamp second. A crash in between replays the migrations next
+  // boot, which is safe because each is idempotent. Stamping first would skip
+  // them and leave the data half-upgraded.
+  if (changed) await writeDB(db);
+  await writeSchemaVersion(SCHEMA_VERSION);
 }
 async function readDB() {
   await ensureDataDir();
@@ -714,19 +849,48 @@ app.use("/ds",     noCache, express.static(DS_OUT_DIR));
 app.use("/assets", noCache, express.static(ASSETS_DIR));
 app.use(noCache, express.static(PUBLIC_DIR));
 
+// Express 4 leaves an async handler's rejection unhandled — no error
+// middleware runs, the socket just stays open, and the frontend's awaited
+// fetch never resolves (stuck spinners, a poll that silently stops). Wrap
+// async handlers so a throw becomes a 500 the client can surface instead.
+const asyncRoute = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch((err) => {
+    console.error("[route]", req.method, req.path, "—", err?.message || err);
+    if (!res.headersSent) res.status(500).json({ error: err?.message || String(err) });
+  });
+};
+
 app.get("/api/config", (_req, res) => {
   res.json(loadConfig());
 });
 
-app.post("/api/config", async (req, res) => {
+app.post("/api/config", asyncRoute(async (req, res) => {
   const patch = req.body || {};
   // Flipping the stack-badge toggle ON forces a fresh stack/language scan on
   // the next /api/projects so the badge row doesn't paint with stale cached
   // results from before the user enabled it.
   if (patch.showStackBadge === true) _stackCache.clear();
+
+  // Reject an unusable status list at the door. loadConfig() would quietly fall
+  // back to the bundled defaults on next boot, which reads as "my statuses
+  // reset themselves" — much better to refuse the save and say why.
+  if (patch.statuses !== undefined && !isValidStatusList(patch.statuses)) {
+    return res.status(400).json({
+      error: "Statuses need at least one entry, each with a unique id and a label.",
+    });
+  }
+
   await saveUserConfig(patch);
-  res.json(loadConfig());
-});
+
+  // Rehome any project left behind by a deleted status before replying, so the
+  // projects list the client reloads next is already consistent.
+  let movedProjects = 0;
+  if (patch.statuses !== undefined) {
+    movedProjects = await reassignOrphanedStatuses(loadConfig().statuses);
+  }
+
+  res.json({ ...loadConfig(), movedProjects });
+}));
 
 // Native folder/file picker — only available when running inside Electron.
 async function nativePicker(opts) {
@@ -827,7 +991,7 @@ async function updateShortcutIcons(srcImagePath) {
 function isRasterIconFormat(ext) { return [".png", ".jpg", ".jpeg", ".ico"].includes(ext); }
 
 // Upload (copy) a chosen file to userData and set it as the active logo.
-app.post("/api/settings/logo", async (req, res) => {
+app.post("/api/settings/logo", asyncRoute(async (req, res) => {
   const src = String(req.body?.path || "");
   if (!src || !fs.existsSync(src)) return res.status(400).json({ error: "File not found." });
   const ext = path.extname(src).toLowerCase() || ".png";
@@ -846,12 +1010,12 @@ app.post("/api/settings/logo", async (req, res) => {
   let shortcutUpdate = null;
   if (isRasterIconFormat(ext)) shortcutUpdate = await updateShortcutIcons(dest);
   res.json({ ok: true, customLogo: dest, shortcutUpdate });
-});
+}));
 
-app.post("/api/settings/logo/reset", async (_req, res) => {
-  const u = loadUserConfig();
-  delete u.customLogo;
-  await fsp.writeFile(USER_CONFIG_PATH, JSON.stringify(u, null, 2));
+app.post("/api/settings/logo/reset", asyncRoute(async (_req, res) => {
+  // Through the config write queue so a concurrent Settings save / reorder
+  // can't be clobbered by this read-modify-write (and vice versa).
+  await updateUserConfig((u) => { delete u.customLogo; return u; });
   // Reset: re-point the shortcut at a fresh copy of the bundled creator
   // icon. We could just clear IconLocation and let Windows fall back to
   // the .exe's embedded icon, but Windows' shell cache is sticky — keying
@@ -864,17 +1028,21 @@ app.post("/api/settings/logo/reset", async (_req, res) => {
   const bundledIcon = path.join(ASSETS_DIR, "icon.ico");
   const shortcutUpdate = await updateShortcutIcons(bundledIcon);
   res.json({ ok: true, shortcutUpdate });
-});
+}));
 
 // Wipe ALL user overrides — back to bundled defaults. Project status DB is preserved.
-app.post("/api/settings/reset", async (_req, res) => {
-  await fsp.writeFile(USER_CONFIG_PATH, "{}");
+app.post("/api/settings/reset", asyncRoute(async (_req, res) => {
+  await updateUserConfig(() => ({}));
   res.json({ ok: true, config: loadConfig() });
-});
+}));
 
-app.get("/api/projects", async (_req, res) => {
+app.get("/api/projects", asyncRoute(async (_req, res) => {
   const cfg = loadConfig();
   let [projects, db] = await Promise.all([scanProjects(cfg), readDB()]);
+  // Drop any interactive Claude/Codex sessions whose terminal has been closed
+  // before we compute per-card session counts, so a card's badge clears the
+  // next time the dashboard fetches after the user exits the terminal.
+  await pruneInteractiveSessions();
   // Lazy staleness sweep — runs on every fetch (refresh, focus, poll), so a
   // task stuck blinking after a dead/failed session resolves itself to
   // "failed" the next time the dashboard looks at it.
@@ -907,6 +1075,12 @@ app.get("/api/projects", async (_req, res) => {
     const lastBackedUpExists = !!(lastBackedUpDest && fs.existsSync(lastBackedUpDest));
     return {
       ...p,
+      // The folder's own git remote wins; otherwise fall back to the repo a
+      // previous publish recorded (the mirror pipeline stores it under
+      // githubPrep.repoUrl and the project folder never gets an origin).
+      // This is what lets the card show its Visit badge — and the update
+      // flows target the right repo — for every already-published project.
+      githubUrl: p.githubUrl || db[p.slug]?.githubPrep?.repoUrl || null,
       status,
       notes: db[p.slug]?.notes || "",
       tasks: Array.isArray(db[p.slug]?.tasks) ? db[p.slug].tasks : [],
@@ -914,6 +1088,9 @@ app.get("/api/projects", async (_req, res) => {
       lastBackedUpDest,
       lastBackedUpExists,
       updatedAt: db[p.slug]?.updatedAt || null,
+      // Interactive Claude/Codex terminals open from this card (see
+      // liveInteractiveSessions) — folded into the card's session badge count.
+      liveSessions: liveInteractiveCount(p.slug),
     };
   });
   // Per-filter sticky card order. Each filter page ("all" + every status)
@@ -979,10 +1156,10 @@ app.get("/api/projects", async (_req, res) => {
     // the active filter's list.
     projectOrders: orders,
   });
-});
+}));
 
 // Add a folder to the manual project list.
-app.post("/api/projects/add", async (req, res) => {
+app.post("/api/projects/add", asyncRoute(async (req, res) => {
   const folder = String(req.body?.path || "").trim();
   if (!folder) return res.status(400).json({ error: "path required" });
   if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
@@ -998,17 +1175,19 @@ app.post("/api/projects/add", async (req, res) => {
     }
   }
 
-  const next = Array.from(new Set([...(loadUserConfig().extraProjectPaths || []), norm]));
-  await saveUserConfig({ extraProjectPaths: next });
+  await updateUserConfig((u) => ({
+    ...u,
+    extraProjectPaths: Array.from(new Set([...(u.extraProjectPaths || []), norm])),
+  }));
   const desc = await describeProject(norm, path.dirname(norm), "extra");
   res.json({ ok: true, project: desc });
-});
+}));
 
 // Create a brand-new (empty) project folder under a designated parent, then
 // track it. Mirrors /api/projects/add's tracking logic: if the new folder
 // lands directly inside an existing scan root the scanner picks it up for
 // free (alreadyTracked); otherwise we register it in extraProjectPaths.
-app.post("/api/projects/create", async (req, res) => {
+app.post("/api/projects/create", asyncRoute(async (req, res) => {
   const parent = String(req.body?.parent || "").trim();
   const name   = String(req.body?.name || "").trim();
   if (!parent) return res.status(400).json({ error: "parent folder required" });
@@ -1043,11 +1222,13 @@ app.post("/api/projects/create", async (req, res) => {
     }
   }
 
-  const next = Array.from(new Set([...(loadUserConfig().extraProjectPaths || []), target]));
-  await saveUserConfig({ extraProjectPaths: next });
+  await updateUserConfig((u) => ({
+    ...u,
+    extraProjectPaths: Array.from(new Set([...(u.extraProjectPaths || []), target])),
+  }));
   const desc = await describeProject(target, path.dirname(target), "extra");
   res.json({ ok: true, created: true, project: desc });
-});
+}));
 
 // Classify a path for the unified Add Project field. The renderer calls this
 // (debounced) as the user types so the primary button can flip between
@@ -1166,6 +1347,51 @@ function flattenTaskText(s, max) {
   return String(s || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+// Reference links — accept an array (one URL each) or a newline string. Keep
+// only http/https URLs, flatten each to a single line, dedupe, cap the count.
+// Anything that doesn't parse as an absolute http(s) URL is dropped.
+function sanitizeTaskLinks(input) {
+  const raw = Array.isArray(input)
+    ? input
+    : String(input || "").split(/[\r\n]+/);
+  const out = [];
+  for (const item of raw) {
+    const s = flattenTaskText(item, 500);
+    if (!s) continue;
+    try {
+      const u = new URL(s);
+      if (u.protocol !== "http:" && u.protocol !== "https:") continue;
+      if (!out.includes(u.href)) out.push(u.href);
+    } catch { /* not a valid URL — skip */ }
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+// Allowed reference-image extensions, keyed for lookup by both extension and
+// the upload's declared content-type.
+const TASK_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]);
+const TASK_IMAGE_MIME_EXT = {
+  "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
+  "image/webp": ".webp", "image/bmp": ".bmp", "image/svg+xml": ".svg",
+};
+// Pick a safe extension from the original filename, falling back to the
+// declared content-type. Returns "" when neither names a known image type.
+function pickImageExt(name, contentType) {
+  const fromName = path.extname(String(name || "")).toLowerCase();
+  if (TASK_IMAGE_EXTS.has(fromName)) return fromName === ".jpeg" ? ".jpg" : fromName;
+  const fromMime = TASK_IMAGE_MIME_EXT[String(contentType || "").split(";")[0].trim().toLowerCase()];
+  return fromMime || "";
+}
+// Remove any stored image file(s) for a task id (extension may have changed
+// between uploads, so sweep every known extension).
+function removeTaskImageFiles(taskId) {
+  for (const ext of TASK_IMAGE_EXTS) {
+    const f = path.join(TASK_IMAGES_DIR, `${taskId}${ext}`);
+    try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {}
+  }
+}
+
 // Create. Body: { title, note? }
 app.post("/api/projects/:slug/tasks", async (req, res) => {
   const slug = req.params.slug;
@@ -1177,6 +1403,8 @@ app.post("/api/projects/:slug/tasks", async (req, res) => {
     id: newTaskId(),
     title,
     note: String(req.body?.note || "").trim().slice(0, 2000),
+    links: sanitizeTaskLinks(req.body?.links),
+    image: null,
     status: "pending",
     statusNote: "",
     createdAt: now,
@@ -1215,15 +1443,21 @@ function buildTaskPrompt(slug, tasks, port) {
   // there. Everything else — newlines, dashes, &, parens — passes verbatim.
   const noteOf = (t) => String(t.note || "").trim().slice(0, 4000).replace(/"/g, "'");
   const titleOf = (t) => flattenTaskText(t.title, 200).replace(/"/g, "'");
+  const linksOf = (t) => (Array.isArray(t.links) ? t.links : []);
+  const imageOf = (t) => (t.image && t.image.file ? t.image.file : "");
 
   if (tasks.length === 1) {
     const t = tasks[0];
     const note = noteOf(t);
+    const links = linksOf(t);
+    const imgPath = imageOf(t);
     return [
       "Complete the following task in the current project directory.",
       "",
       "TASK: " + titleOf(t),
       ...(note ? ["", "DESCRIPTION:", note] : []),
+      ...(links.length ? ["", "REFERENCE LINKS:", ...links.map((u) => "- " + u)] : []),
+      ...(imgPath ? ["", "REFERENCE IMAGE (open and view this file on disk):", imgPath] : []),
       "",
       "FIRST — before doing anything else, confirm pickup by running:",
       ackCmd,
@@ -1238,8 +1472,12 @@ function buildTaskPrompt(slug, tasks, port) {
 
   const blocks = tasks.map((t, i) => {
     const note = noteOf(t);
+    const links = linksOf(t);
+    const imgPath = imageOf(t);
     return `TASK ${i + 1} (id ${t.id}): ${titleOf(t)}` +
-      (note ? `\nDESCRIPTION:\n${note}` : "");
+      (note ? `\nDESCRIPTION:\n${note}` : "") +
+      (links.length ? `\nREFERENCE LINKS:\n${links.map((u) => "- " + u).join("\n")}` : "") +
+      (imgPath ? `\nREFERENCE IMAGE (open and view this file on disk):\n${imgPath}` : "");
   }).join("\n\n");
   return [
     "Work through the following tasks IN ORDER, one at a time, in the current project directory.",
@@ -1307,14 +1545,89 @@ app.post("/api/projects/:slug/tasks/send", async (req, res) => {
     }
     sent = targets.map((t) => ({ ...t }));
     if (targets.length) {
-      db[slug] = { ...(db[slug] || {}), tasks, updatedAt: now };
+      // Executing a task means work is actively underway — flip the project's
+      // own status to "In Progress" (config status id) so the dashboard
+      // reflects it automatically, mirroring the per-task in-progress state
+      // set above. Skip "archived": that's a deliberately hidden/closed state
+      // a user must reopen by hand, not something a queued task should revive.
+      const projStatus = db[slug]?.status;
+      const nextStatus = projStatus === "archived" ? projStatus : "in-progress";
+      db[slug] = { ...(db[slug] || {}), tasks, status: nextStatus, updatedAt: now };
     }
   });
   if (!sent.length) return res.status(400).json({ error: "No open tasks to send." });
 
   try {
-    spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, sent, cfg.port), cliKey);
+    ensureFolderTrusted(folder, cliKey);
+    spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, sent, cfg.port), cliKey, {
+      headless: cfg.headlessTerminals === true,
+      slug,
+    });
     res.json({ ok: true, cli: cliKey, count: sent.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Open the background AI session terminals so the user can watch what's
+// running — a project card's "N Session(s)" badge calls this ("open up all the
+// active terminal session windows"). Two cases:
+//   • Visible mode: every send opened a real wt.exe window, so we raise them all
+//     to the foreground (focusTerminalWindows).
+//   • Headless mode: sessions run in a hidden console with NO window of their
+//     own, writing their output to a per-session log file. There's nothing to
+//     raise — so instead we open a fresh terminal that live-tails each active
+//     session log, which is what "open the running terminal" means for a
+//     windowless session (openHeadlessSessionTerminals).
+// We try the headless path first when headless is on; if no live logs are found
+// we still fall back to raising any stray visible windows, so the button always
+// does the most useful thing it can.
+app.post("/api/sessions/open", (_req, res) => {
+  try {
+    // Headless sessions now run as REAL (minimized) Windows Terminal windows,
+    // so raising them is the same path as visible sessions — restore + focus.
+    // Fall back to the live-log tail for any legacy windowless session that
+    // might still be running — unconditionally, not gated on the current
+    // headless setting: the logs on disk are the ground truth, and the toggle
+    // may have been flipped since those sessions started.
+    const focused = focusTerminalWindows();
+    if (focused > 0) return res.json({ ok: true, focused });
+    const opened = openHeadlessSessionTerminals();
+    if (opened > 0) return res.json({ ok: true, headless: true, focused: opened });
+    res.json({ ok: true, focused });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Per-project variant of the above — a card's "N Session(s)" badge calls THIS
+// so it opens only the terminals belonging to that project, not every running
+// session. Visible windows are matched by their title (the project's folder
+// basename, set in spawnAiPrompt); headless logs are matched by slug.
+app.post("/api/projects/:slug/sessions/open", (req, res) => {
+  const slug = req.params.slug;
+  let folder = "";
+  try { folder = fromSlug(slug); } catch {}
+  const titleNeedle = folder ? path.basename(folder) : "";
+  try {
+    // Headless sessions are now real (minimized) wt windows titled with the
+    // project basename, so the same title-matched raise works for them — restore
+    // this project's minimized session(s). The tracked window handles cover
+    // sessions whose tab the CLI renamed past recognition.
+    const focused = focusTerminalWindows(titleNeedle, sessionWindowHandles(slug));
+    if (focused > 0) return res.json({ ok: true, focused });
+    // Legacy windowless sessions live-tail their on-disk log. Not gated on the
+    // current headless setting — the logs are the ground truth.
+    const opened = openHeadlessSessionTerminals(slug);
+    if (opened > 0) return res.json({ ok: true, headless: true, focused: opened });
+    // Still nothing? The badge only shows when something IS running, so an
+    // empty result here almost always means the session's window answers to a
+    // title we couldn't predict. Raise every running terminal window rather
+    // than telling the user "no terminals found" while their session sits in
+    // one of them — `fallback` lets the toast say what happened.
+    const all = focusTerminalWindows();
+    if (all > 0) return res.json({ ok: true, focused: all, fallback: true });
+    res.json({ ok: true, focused: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message || String(err) });
   }
@@ -1359,6 +1672,9 @@ app.post("/api/projects/:slug/tasks/restore", async (req, res) => {
     id: t.id,
     title: flattenTaskText(t.title, 200),
     note: String(t.note || "").trim().slice(0, 2000),
+    links: sanitizeTaskLinks(t.links),
+    // Restore keeps the same id, so any image file still on disk re-attaches.
+    image: t.image && typeof t.image.name === "string" && typeof t.image.file === "string" ? t.image : null,
     status: TASK_STATUSES.has(t.status) ? t.status : "pending",
     statusNote: flattenTaskText(t.statusNote, 500),
     createdAt: typeof t.createdAt === "string" ? t.createdAt : now,
@@ -1397,6 +1713,8 @@ app.post("/api/projects/:slug/tasks/:taskId/delete", async (req, res) => {
     db[slug].updatedAt = new Date().toISOString();
   });
   if (!found) return res.status(404).json({ error: "task not found" });
+  // The task can still be restored from the undo toast, so its image file is
+  // intentionally left on disk — restore re-attaches it by id.
   res.json({ ok: true });
 });
 
@@ -1413,6 +1731,7 @@ app.post("/api/projects/:slug/tasks/:taskId", async (req, res) => {
       if (title) t.title = title;
     }
     if (typeof req.body?.note === "string") t.note = req.body.note.trim().slice(0, 2000);
+    if (req.body?.links !== undefined) t.links = sanitizeTaskLinks(req.body.links);
     if (typeof req.body?.status === "string" && TASK_STATUSES.has(req.body.status)) {
       t.status = req.body.status;
       // A manual status change supersedes whatever the agent last reported —
@@ -1420,6 +1739,83 @@ app.post("/api/projects/:slug/tasks/:taskId", async (req, res) => {
       // the user has since flipped back to pending.
       t.statusNote = "";
     }
+    t.updatedAt = now;
+    db[slug].updatedAt = now;
+    updated = { ...t };
+  });
+  if (!updated) return res.status(404).json({ error: "task not found" });
+  res.json({ ok: true, task: updated });
+});
+
+// ─── Task reference image ─────────────────────────────────────────────────────
+// Attach an image to a task so the spawned AI session can read it by path.
+// The renderer uploads the raw bytes (no base64) with the original filename in
+// ?name= and the image's mime type as Content-Type. express.raw on THIS route
+// has its own large limit, so the upload sidesteps the global 1 MB JSON cap.
+// The global express.json/urlencoded parsers ignore the request because its
+// content-type is image/* (or octet-stream), so the body reaches this parser
+// untouched. One file per task, named by task id.
+app.post(
+  "/api/projects/:slug/tasks/:taskId/image",
+  express.raw({ type: () => true, limit: "25mb" }),
+  async (req, res) => {
+    const { slug, taskId } = req.params;
+    if (!fs.existsSync(fromSlug(slug))) return res.status(404).json({ error: "folder not found" });
+    const buf = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!buf || !buf.length) return res.status(400).json({ error: "no image data" });
+    const origName = flattenTaskText(req.query?.name, 200) || "image";
+    const ext = pickImageExt(origName, req.headers["content-type"]);
+    if (!ext) return res.status(400).json({ error: "unsupported image type" });
+
+    try {
+      fs.mkdirSync(TASK_IMAGES_DIR, { recursive: true });
+      // Replacing an image: drop any prior file (extension may differ) first.
+      removeTaskImageFiles(taskId);
+      const file = path.join(TASK_IMAGES_DIR, `${taskId}${ext}`);
+      fs.writeFileSync(file, buf);
+
+      const now = new Date().toISOString();
+      let updated = null;
+      await updateDB((db) => {
+        const t = (db[slug]?.tasks || []).find((t) => t.id === taskId);
+        if (!t) return;
+        t.image = { name: origName, file };
+        t.updatedAt = now;
+        db[slug].updatedAt = now;
+        updated = { ...t };
+      });
+      if (!updated) {
+        removeTaskImageFiles(taskId);
+        return res.status(404).json({ error: "task not found" });
+      }
+      res.json({ ok: true, task: updated });
+    } catch (err) {
+      res.status(500).json({ error: err.message || String(err) });
+    }
+  }
+);
+
+// Serve a task's reference image back to the renderer for the editor preview.
+app.get("/api/projects/:slug/tasks/:taskId/image", async (req, res) => {
+  const { slug, taskId } = req.params;
+  const db = await readDB();
+  const t = (db[slug]?.tasks || []).find((t) => t.id === taskId);
+  const file = t?.image?.file;
+  if (!file || !fs.existsSync(file)) return res.status(404).json({ error: "no image" });
+  res.set("Cache-Control", "no-store");
+  res.sendFile(file);
+});
+
+// Detach + delete a task's reference image.
+app.post("/api/projects/:slug/tasks/:taskId/image/delete", async (req, res) => {
+  const { slug, taskId } = req.params;
+  removeTaskImageFiles(taskId);
+  const now = new Date().toISOString();
+  let updated = null;
+  await updateDB((db) => {
+    const t = (db[slug]?.tasks || []).find((t) => t.id === taskId);
+    if (!t) return;
+    t.image = null;
     t.updatedAt = now;
     db[slug].updatedAt = now;
     updated = { ...t };
@@ -1494,6 +1890,413 @@ app.post("/api/tasks/report", (req, res) => {
   });
 });
 
+// ─── Scheduled tasks ─────────────────────────────────────────────────────────
+// A schedule is a TEMPLATE that, when its time comes, materialises a concrete
+// task on the chosen project (db[slug].tasks) and immediately sends it to the
+// configured AI agent — reusing the exact same task pipeline (buildTaskPrompt,
+// ack/report curls, staleness sweep, card UI). So a fired schedule shows up and
+// progresses just like any hand-added task.
+//
+// Persistence lives in its own file (schedules.json) with the same serialized
+// read-modify-write queue as projects.json. Each schedule stores nextRunAt (an
+// absolute ISO timestamp); a 30s ticker plus a boot sweep fire anything whose
+// nextRunAt is in the past. That single rule gives us the "runs while the PC is
+// on, and catches up the moment it reconnects" behaviour for free: while the
+// app was closed nextRunAt simply drifted into the past, so the first tick after
+// launch fires it once and then advances nextRunAt to the next future slot.
+const SCHEDULE_RECURRENCES = new Set(["once", "daily", "weekly", "monthly"]);
+
+let _schedulesWriteQueue = Promise.resolve();
+async function readSchedules() {
+  await ensureDataDir();
+  try {
+    const raw = JSON.parse(await fsp.readFile(SCHEDULES_DB, "utf8"));
+    return Array.isArray(raw) ? raw : [];
+  } catch { return []; }
+}
+async function writeSchedules(list) {
+  await ensureDataDir();
+  await fsp.writeFile(SCHEDULES_DB, JSON.stringify(list, null, 2));
+}
+// Serialized so the 30s ticker's "advance nextRunAt" write can't clobber a
+// concurrent edit/create from the overlay. Mutator gets the array, mutates in
+// place (push/splice/find-and-set); the final array is persisted and returned.
+function updateSchedules(mutator) {
+  const next = _schedulesWriteQueue.then(async () => {
+    const list = await readSchedules();
+    await mutator(list);
+    await writeSchedules(list);
+    return list;
+  });
+  _schedulesWriteQueue = next.catch(() => {});
+  return next;
+}
+
+function newScheduleId() {
+  return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+// "HH:MM" → [hours, minutes], defaulting to 09:00 on anything malformed.
+function parseHHMM(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+  let hh = m ? Number(m[1]) : 9;
+  let mm = m ? Number(m[2]) : 0;
+  if (!(hh >= 0 && hh <= 23)) hh = 9;
+  if (!(mm >= 0 && mm <= 59)) mm = 0;
+  return [hh, mm];
+}
+function clampInt(v, lo, hi, dflt) {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) && n >= lo && n <= hi ? n : dflt;
+}
+
+// Next fire time (ms epoch) at or after fromMs, computed in the server's LOCAL
+// timezone (== the user's PC). Returns null when there is no future run (a
+// "once" with an unparseable/empty datetime). All arithmetic goes through the
+// local Date constructor so day/month overflow normalises correctly (e.g. a
+// "31st" schedule clamps to the last day of shorter months).
+function computeNextRun(s, fromMs) {
+  if (s.recurrence === "once") {
+    const t = Date.parse(s.startAt || "");
+    return Number.isFinite(t) ? t : null;
+  }
+  const [hh, mm] = parseHHMM(s.time);
+  const from = new Date(fromMs);
+  const at = (y, mo, d) => new Date(y, mo, d, hh, mm, 0, 0).getTime();
+
+  if (s.recurrence === "daily") {
+    let t = at(from.getFullYear(), from.getMonth(), from.getDate());
+    if (t <= fromMs) t = at(from.getFullYear(), from.getMonth(), from.getDate() + 1);
+    return t;
+  }
+  if (s.recurrence === "weekly") {
+    const want = clampInt(s.weekday, 0, 6, 1);
+    const diff = (want - from.getDay() + 7) % 7;
+    let t = at(from.getFullYear(), from.getMonth(), from.getDate() + diff);
+    if (t <= fromMs) t = at(from.getFullYear(), from.getMonth(), from.getDate() + diff + 7);
+    return t;
+  }
+  if (s.recurrence === "monthly") {
+    const wantDay = clampInt(s.day, 1, 31, 1);
+    const inMonth = (y, mo) => {
+      const dim = new Date(y, mo + 1, 0).getDate(); // last day of that month
+      return at(y, mo, Math.min(wantDay, dim));
+    };
+    let t = inMonth(from.getFullYear(), from.getMonth());
+    if (t <= fromMs) {
+      const nm = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+      t = inMonth(nm.getFullYear(), nm.getMonth());
+    }
+    return t;
+  }
+  return null;
+}
+function nextRunIso(s, fromMs) {
+  const t = computeNextRun(s, fromMs);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+// Build a clean schedule object from raw client input. `base` carries the
+// immutable fields (id/createdAt) on edit; omit it for a create.
+function buildSchedule(input, base = null) {
+  const now = new Date().toISOString();
+  const recurrence = SCHEDULE_RECURRENCES.has(input.recurrence) ? input.recurrence : "daily";
+  const agent = input.agent === "codex" || input.agent === "claude" ? input.agent : null;
+  // Multi-project: `slugs` is the source of truth; `slug` (its first entry)
+  // is kept in sync for rows/readers written before multi-select existed.
+  const rawSlugs = Array.isArray(input.slugs) && input.slugs.length
+    ? input.slugs
+    : (input.slug !== undefined ? [input.slug] : (base?.slugs || [base?.slug]));
+  const slugs = Array.from(new Set(rawSlugs.map((x) => String(x || "")).filter(Boolean))).slice(0, 50);
+  const s = {
+    id: base?.id || newScheduleId(),
+    slug: slugs[0] || "",
+    slugs,
+    title: flattenTaskText(input.title, 200),
+    note: String(input.note || "").trim().slice(0, 2000),
+    links: sanitizeTaskLinks(input.links),
+    recurrence,
+    time: parseHHMM(input.time).map((n, i) => String(n).padStart(2, "0")).join(":"),
+    weekday: clampInt(input.weekday, 0, 6, 1),
+    day: clampInt(input.day, 1, 31, 1),
+    startAt: typeof input.startAt === "string" ? input.startAt.trim() : (base?.startAt || ""),
+    agent,
+    enabled: input.enabled === undefined ? (base?.enabled !== false) : input.enabled !== false,
+    createdAt: base?.createdAt || now,
+    updatedAt: now,
+    lastRunAt: base?.lastRunAt || null,
+    lastStatus: base?.lastStatus || "scheduled",
+    lastError: base?.lastError || "",
+    lastTaskId: base?.lastTaskId || null,
+    nextRunAt: null, // filled by caller via nextRunIso
+  };
+  return s;
+}
+
+// Every project slug a schedule targets. Rows written before multi-select
+// carry only `slug`; normalise both shapes to one deduped array.
+function scheduleSlugs(s) {
+  const list = Array.isArray(s.slugs) && s.slugs.length ? s.slugs : [s.slug];
+  return Array.from(new Set(list.map((x) => String(x || "")).filter(Boolean)));
+}
+
+// Materialise a concrete task on EVERY project the schedule targets and send
+// each to the agent — the heart of a fired schedule. Partial failure is fine
+// (one moved folder must not stop the others); throws only when NOTHING could
+// fire, so the caller records a real error. Returns { cli, taskId, fired,
+// errors } — taskId is the first fired task, for lastTaskId back-compat.
+async function fireSchedule(sched) {
+  if (!flattenTaskText(sched.title, 200)) throw new Error("Schedule has no task title");
+
+  const cfg = loadConfig();
+  const cliKey = sched.agent === "codex" || sched.agent === "claude"
+    ? sched.agent
+    : (cfg.taskAgent === "codex" ? "codex" : "claude");
+  const cliExecutable = cfg.tools?.[cliKey] || cliKey;
+  if (INSTALLABLE_TOOLS[cliKey] && !isCommandOnPath(cliExecutable)) {
+    throw new Error(`${INSTALLABLE_TOOLS[cliKey].displayName} CLI is not installed`);
+  }
+
+  const fired = [];
+  const errors = [];
+  for (const slug of scheduleSlugs(sched)) {
+    try {
+      let folder = "";
+      try { folder = fromSlug(slug); } catch { throw new Error("Bad project reference"); }
+      if (!fs.existsSync(folder)) {
+        throw new Error(`Project folder not found (${path.basename(folder) || slug})`);
+      }
+
+      const now = new Date().toISOString();
+      const task = {
+        id: newTaskId(),
+        title: flattenTaskText(sched.title, 200),
+        note: String(sched.note || "").trim().slice(0, 2000),
+        links: Array.isArray(sched.links) ? sched.links : [],
+        image: null,
+        status: "in-progress",
+        statusNote: "",
+        createdAt: now,
+        updatedAt: now,
+        // Provenance marker — lets the UI label this as a scheduled run, and
+        // keeps it distinguishable from a hand-added task.
+        scheduledFrom: sched.id,
+        agent: cliKey,
+        sentAt: now,
+      };
+      await updateDB((db) => {
+        const entry = db[slug] || {};
+        entry.tasks = Array.isArray(entry.tasks) ? entry.tasks : [];
+        entry.tasks.push(task);
+        // A fired schedule executes a task too — flip the project status to "In
+        // Progress" so the dashboard reflects active work, same as a manual send.
+        // Skip "archived" (a deliberately closed state the user must reopen).
+        if (entry.status !== "archived") entry.status = "in-progress";
+        entry.updatedAt = now;
+        db[slug] = entry;
+      });
+
+      ensureFolderTrusted(folder, cliKey);
+      spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, [task], cfg.port), cliKey, {
+        headless: cfg.headlessTerminals === true,
+        slug,
+      });
+      fired.push({ slug, taskId: task.id });
+    } catch (err) {
+      errors.push(err?.message || String(err));
+    }
+  }
+
+  if (!fired.length) throw new Error(errors[0] || "No projects to run on");
+  return { cli: cliKey, taskId: fired[0].taskId, fired, errors };
+}
+
+// Reentrancy guard so an overrunning tick (or a boot sweep that overlaps the
+// first interval) can't double-fire the same schedule.
+let _schedulerRunning = false;
+async function runDueSchedules(reason = "tick") {
+  if (_schedulerRunning) return;
+  _schedulerRunning = true;
+  try {
+    const nowMs = Date.now();
+    const all = await readSchedules();
+    const due = all.filter((s) =>
+      s.enabled && s.nextRunAt && Date.parse(s.nextRunAt) <= nowMs
+    );
+    for (const s of due) {
+      let firedTaskId = null;
+      let errMsg = "";
+      try {
+        const r = await fireSchedule(s);
+        firedTaskId = r.taskId;
+        console.log(`[schedule] fired ${s.id} (${reason}) → ${r.fired.length} task(s) via ${r.cli}`);
+        if (r.errors.length) console.warn(`[schedule] partial: ${s.id} skipped ${r.errors.length} project(s): ${r.errors.join("; ")}`);
+      } catch (err) {
+        errMsg = err?.message || String(err);
+        console.warn(`[schedule] fire failed ${s.id}: ${errMsg}`);
+      }
+      const ranAt = new Date().toISOString();
+      // Advance strictly past "now" so an at-or-before-now comparison next tick
+      // doesn't immediately re-fire. A "once" never repeats — it disables.
+      const nextIso = s.recurrence === "once" ? null : nextRunIso(s, Date.now() + 1000);
+      await updateSchedules((list) => {
+        const cur = list.find((x) => x.id === s.id);
+        if (!cur) return;
+        cur.lastRunAt = ranAt;
+        cur.lastStatus = errMsg ? "error" : "ran";
+        cur.lastError = errMsg;
+        if (firedTaskId) cur.lastTaskId = firedTaskId;
+        cur.nextRunAt = nextIso;
+        if (cur.recurrence === "once") cur.enabled = false;
+        cur.updatedAt = ranAt;
+      });
+    }
+  } catch (err) {
+    console.warn("[schedule] sweep error:", err?.message || err);
+  } finally {
+    _schedulerRunning = false;
+  }
+}
+
+// List — enriched with the resolved project names and an existence flag so the
+// overlay can flag schedules whose folder(s) have since moved/been deleted.
+app.get("/api/schedules", async (_req, res) => {
+  const list = await readSchedules();
+  const schedules = list.map((s) => {
+    const slugs = scheduleSlugs(s);
+    const projectNames = [];
+    let missing = 0;
+    for (const sl of slugs) {
+      let nm = "";
+      let exists = false;
+      try {
+        const f = fromSlug(sl);
+        nm = path.basename(f);
+        exists = fs.existsSync(f);
+      } catch {}
+      projectNames.push(nm || "(unknown)");
+      if (!exists) missing++;
+    }
+    return {
+      ...s,
+      slugs,
+      projectNames,
+      // Legacy single-name field now carries the joined list — every reader
+      // of it was displaying it as a label anyway.
+      projectName: projectNames.join(", "),
+      projectExists: slugs.length > 0 && missing === 0,
+    };
+  });
+  res.json({ schedules });
+});
+
+// Shared create/update validation. Returns an error string or null.
+function scheduleValidationError(sched) {
+  const slugs = scheduleSlugs(sched);
+  if (!slugs.length) return "Pick at least one project.";
+  for (const sl of slugs) {
+    try { if (fs.existsSync(fromSlug(sl))) continue; } catch {}
+    return "One of the selected projects no longer exists.";
+  }
+  if (!sched.title) return "Task name required.";
+  if (sched.recurrence === "once" && !Number.isFinite(Date.parse(sched.startAt))) {
+    return "Pick a date and time for a one-off schedule.";
+  }
+  return null;
+}
+
+// Create. Body: { slugs (or slug), title, note?, links?, recurrence, time?, weekday?, day?, startAt?, agent? }
+app.post("/api/schedules", async (req, res) => {
+  const sched = buildSchedule(req.body || {});
+  const bad = scheduleValidationError(sched);
+  if (bad) return res.status(400).json({ error: bad });
+  sched.nextRunAt = nextRunIso(sched, Date.now());
+  await updateSchedules((list) => { list.push(sched); });
+  res.json({ ok: true, schedule: sched });
+});
+
+// Update. Same body as create; any subset of fields. Recomputes nextRunAt from
+// now (enabled) so a changed time/recurrence takes effect on the next tick.
+app.post("/api/schedules/:id", async (req, res) => {
+  const id = req.params.id;
+  const b = req.body || {};
+  let updated = null;
+  let bad = null;
+  await updateSchedules((list) => {
+    const cur = list.find((x) => x.id === id);
+    if (!cur) return;
+    // Merge: client may send only the fields it changed.
+    const merged = buildSchedule({
+      slugs: b.slugs !== undefined ? b.slugs
+        : (b.slug !== undefined ? [b.slug] : scheduleSlugs(cur)),
+      title: b.title !== undefined ? b.title : cur.title,
+      note: b.note !== undefined ? b.note : cur.note,
+      links: b.links !== undefined ? b.links : cur.links,
+      recurrence: b.recurrence !== undefined ? b.recurrence : cur.recurrence,
+      time: b.time !== undefined ? b.time : cur.time,
+      weekday: b.weekday !== undefined ? b.weekday : cur.weekday,
+      day: b.day !== undefined ? b.day : cur.day,
+      startAt: b.startAt !== undefined ? b.startAt : cur.startAt,
+      agent: b.agent !== undefined ? b.agent : cur.agent,
+      enabled: b.enabled !== undefined ? b.enabled : cur.enabled,
+    }, cur);
+    bad = scheduleValidationError(merged);
+    if (bad) return;
+    // Re-enabling (or editing) a finished "once" needs a future run; otherwise
+    // recompute from now so the new cadence lands on its next slot.
+    merged.nextRunAt = merged.enabled ? nextRunIso(merged, Date.now()) : null;
+    Object.assign(cur, merged);
+    updated = { ...cur };
+  });
+  if (bad) return res.status(400).json({ error: bad });
+  if (!updated) return res.status(404).json({ error: "schedule not found" });
+  res.json({ ok: true, schedule: updated });
+});
+
+// Delete.
+app.post("/api/schedules/:id/delete", async (req, res) => {
+  const id = req.params.id;
+  let found = false;
+  await updateSchedules((list) => {
+    const idx = list.findIndex((x) => x.id === id);
+    if (idx === -1) return;
+    list.splice(idx, 1);
+    found = true;
+  });
+  if (!found) return res.status(404).json({ error: "schedule not found" });
+  res.json({ ok: true });
+});
+
+// Run now — fire immediately (a manual test / "do it now"), without disturbing
+// the regular cadence: nextRunAt is left intact for recurring schedules.
+app.post("/api/schedules/:id/run", async (req, res) => {
+  const id = req.params.id;
+  const list = await readSchedules();
+  const sched = list.find((x) => x.id === id);
+  if (!sched) return res.status(404).json({ error: "schedule not found" });
+  try {
+    const r = await fireSchedule(sched);
+    const ranAt = new Date().toISOString();
+    await updateSchedules((l) => {
+      const cur = l.find((x) => x.id === id);
+      if (!cur) return;
+      cur.lastRunAt = ranAt;
+      cur.lastStatus = "ran";
+      cur.lastError = "";
+      cur.lastTaskId = r.taskId;
+      cur.updatedAt = ranAt;
+    });
+    res.json({ ok: true, cli: r.cli, taskId: r.taskId });
+  } catch (err) {
+    const msg = err?.message || String(err);
+    await updateSchedules((l) => {
+      const cur = l.find((x) => x.id === id);
+      if (cur) { cur.lastStatus = "error"; cur.lastError = msg; cur.updatedAt = new Date().toISOString(); }
+    });
+    res.status(500).json({ error: msg });
+  }
+});
+
 // Detached-spawn helper that handles Node 20+'s restriction on running .cmd/.bat
 // files. Without shell:true Node throws EINVAL for those; with shell:true Node
 // concatenates args without escaping, so we manually quote every argument.
@@ -1548,6 +2351,706 @@ function spawnTerminal(folder, cmd) {
     ["/c", "start", "", "wt.exe", "-d", folder, "cmd", "/k", cmd],
     { detached: true, stdio: "ignore", windowsHide: true, shell: false }
   ).unref();
+}
+
+// Live headless-session logs, keyed by log-file path → { startedAt, title }.
+// Headless sessions have no window, so we remember each one's log file while it
+// runs; the session badge opens a terminal that live-tails these (see
+// openHeadlessSessionTerminals). Entries are added in spawnAiPrompt's headless
+// branch and dropped a minute after the child exits.
+const liveHeadlessLogs = new Map();
+
+// Open a fresh Windows Terminal window that live-tails each running headless
+// session's log, so the badge can "open the running terminal" even though the
+// session itself is windowless. Each window keeps itself open (-NoExit) and
+// `Get-Content -Wait` streams new output as the agent produces it. Returns how
+// many terminals were opened. When `slug` is given, only this project's
+// session(s) are opened (the per-card badge passes its project's slug); with no
+// slug, every running headless session is opened (the global action).
+//
+// Candidates come from TWO sources, merged and deduped:
+//   1. liveHeadlessLogs — sessions this server process spawned (has a good title).
+//   2. An on-disk scan of task-session-*.log — covers sessions spawned before
+//      the server auto-relaunched (a packaged restart, or the dev file-watcher,
+//      both wipe the in-memory map). Without this the badge goes blind to a
+//      still-running session after ANY restart.
+// Selection: open every candidate touched in the last 30 minutes (so concurrent
+// runs all surface); if none are that recent, open the single newest so an
+// active project's badge ALWAYS shows its session — even one that's been quietly
+// thinking for a while (a stale mtime no longer hides a live session, which was
+// the core "open does nothing / errors" bug).
+function openHeadlessSessionTerminals(slug = "") {
+  const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
+
+  // Recover a friendly window title from a log's embedded slug
+  // (task-session-<slug>-<rand>.log) — the in-memory title is gone after a
+  // restart, so decode the project folder name rather than show "AI session".
+  const titleFromLogName = (fileName) => {
+    const m = /^task-session-(.+)-[0-9a-z]+\.log$/i.exec(fileName);
+    if (!m) return "AI session";
+    try { return path.basename(fromSlug(m[1])) || "AI session"; } catch { return "AI session"; }
+  };
+
+  // logFile → { logFile, title, mtime }. existsSync guards Get-Content -Wait,
+  // which errors out immediately on a missing path.
+  const byPath = new Map();
+  const consider = (logFile, title) => {
+    if (byPath.has(logFile)) return;
+    let mtime = 0;
+    try {
+      if (!fs.existsSync(logFile)) return;
+      mtime = fs.statSync(logFile).mtimeMs;
+    } catch { return; }
+    byPath.set(logFile, { logFile, title: title || titleFromLogName(path.basename(logFile)), mtime });
+  };
+
+  for (const [logFile, meta] of liveHeadlessLogs) {
+    if (slug && meta && meta.slug && meta.slug !== slug) continue;
+    consider(logFile, meta && meta.title);
+  }
+  try {
+    for (const f of fs.readdirSync(DATA_DIR)) {
+      if (!/^task-session-.*\.log$/.test(f)) continue;
+      if (slug && !f.startsWith(`task-session-${slug}-`)) continue;
+      consider(path.join(DATA_DIR, f), titleFromLogName(f));
+    }
+  } catch {}
+
+  let entries = Array.from(byPath.values()).sort((a, b) => b.mtime - a.mtime);
+  if (entries.length) {
+    const RECENT_MS = 30 * 60 * 1000;
+    const recent = entries.filter((e) => Date.now() - e.mtime <= RECENT_MS);
+    entries = recent.length ? recent : [entries[0]];
+  }
+  // Clean out tail scripts written by earlier opens (older than an hour) so the
+  // data dir doesn't accumulate them — each open below writes one short-lived
+  // task-tail-*.ps1 next to the session logs.
+  try {
+    for (const f of fs.readdirSync(DATA_DIR)) {
+      if (!/^task-tail-.*\.ps1$/.test(f)) continue;
+      const full = path.join(DATA_DIR, f);
+      try {
+        if (Date.now() - fs.statSync(full).mtimeMs > 60 * 60 * 1000) fs.unlinkSync(full);
+      } catch {}
+    }
+  } catch {}
+
+  let opened = 0;
+  for (const { logFile, title } of entries) {
+    const banner = "Live output from the background AI session. Closing this window does NOT stop the task.";
+    // The tail logic MUST go in a .ps1 launched with -File, NOT an inline
+    // -Command. Windows Terminal treats a semicolon on its own command line as
+    // a subcommand (new-tab) delimiter, and a multi-statement tail script is
+    // full of them — passing it inline made wt swallow everything after the
+    // first ';', so the window opened to a bare PowerShell prompt with no live
+    // output (plus stray error tabs). A script file keeps wt's command line
+    // free of semicolons entirely. Leading BOM so PowerShell 5.1 decodes the
+    // em-dash / emoji in the title correctly (same reason as spawnAiPrompt).
+    const scriptBody =
+      `$Host.UI.RawUI.WindowTitle = ${psQuote(title + " — live session")}\r\n` +
+      `Write-Host ${psQuote(banner)} -ForegroundColor Cyan\r\n` +
+      `Write-Host ''\r\n` +
+      `Get-Content -Wait -Tail 1000 -LiteralPath ${psQuote(logFile)}\r\n`;
+    let scriptFile;
+    try {
+      scriptFile = path.join(
+        DATA_DIR,
+        `task-tail-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.ps1`
+      );
+      fs.writeFileSync(scriptFile, "﻿" + scriptBody, "utf8");
+    } catch { continue; }
+    try {
+      spawn(
+        "cmd.exe",
+        ["/c", "start", "", "wt.exe", "--title", `${title} — live`, "powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptFile],
+        { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+      ).unref();
+      opened++;
+    } catch {}
+  }
+  return opened;
+}
+
+// Bring every running background AI session window to the foreground so the
+// user can watch what's going on — the "open the active terminal sessions"
+// action behind a card's session badge. Sessions are launched via wt.exe
+// (spawnAiPrompt), so each lives in a WindowsTerminal.exe window. Those windows
+// are spawned detached and we never hold their handles, so we enumerate EVERY
+// visible top-level window, keep the ones owned by a WindowsTerminal process,
+// and raise each. SetForegroundWindow alone loses to Windows' foreground lock
+// when called from a background process, so we briefly AttachThreadInput to the
+// current foreground thread first — the canonical workaround. Returns how many
+// windows were raised. Synchronous (spawnSync) because the caller is a click
+// handler that wants an immediate count back.
+//
+// `titleNeedle` (optional) scopes the raise to one project — the project's
+// folder basename, which is what each session's TAB is titled (both our own
+// --title and Claude/Codex's "<spinner> <project>" rename contain it). Empty
+// needle raises every WindowsTerminal window (the global action).
+//
+// `handles` (optional) — window handles this project's launches were tracked
+// into (sessionWindowsBySlug). Those windows are raised no matter what their
+// tabs are called, which is what makes the badge work after Claude/Codex
+// retitle the tab to something without the project name in it.
+//
+// We match TABS, via UI Automation, not window titles. A Windows Terminal window
+// exposes only ONE title — its ACTIVE tab's — so as soon as a user merges
+// sessions into a single tabbed window (four sessions in one window is normal),
+// a window-title match finds only whichever project is frontmost and reports
+// "no terminal windows found" for every other project, even though the session
+// is sitting right there in a tab. Matching tabs also lets us select the right
+// one before raising, so the click lands on the session the user asked for.
+//
+// Matching runs in layers, strictest first, so precision degrades gracefully
+// instead of failing to nothing:
+//   1. exact tab/title equality (normalised) — the pre-existing rule,
+//   2. tracked window handles — raise the windows this project launched,
+//   3. loose containment — only when 1+2 raised NOTHING, so a decorated title
+//      ("<project> — fixing tests") is still found; scoped this late so the
+//      old prefix over-match ("lunar leads" vs "lunar leads landing") can only
+//      happen when the alternative is an empty result.
+function focusTerminalWindows(titleNeedle = "", handles = []) {
+  const psNeedle = String(titleNeedle).replace(/'/g, "''");
+  const psHandles = (Array.isArray(handles) ? handles : [])
+    .map((h) => String(h).replace(/[^0-9-]/g, ""))
+    .filter(Boolean)
+    .map((h) => `'${h}'`)
+    .join(",");
+  const script = `
+$ErrorActionPreference='SilentlyContinue'
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$needle = '${psNeedle}'
+Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public class CDWin {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
+  // Deliberately enumerates ALL top-level windows, not just visible ones. A wt
+  // window can be sitting there hidden (WS_VISIBLE cleared) with live sessions
+  // inside it — filtering on IsWindowVisible here would make the badge report
+  // "no terminal found" for a session that is very much still running, and
+  // leave the user no way to get the window back. Raise() un-hides it instead.
+  public static List<IntPtr> Candidates(){
+    var r = new List<IntPtr>();
+    EnumWindows((h,l)=>{ r.Add(h); return true; }, IntPtr.Zero);
+    return r;
+  }
+  public static bool Shown(IntPtr h){ return IsWindowVisible(h); }
+  public static uint PidOf(IntPtr h){ uint p; GetWindowThreadProcessId(h, out p); return p; }
+  public static string Title(IntPtr h){ var sb = new System.Text.StringBuilder(512); GetWindowText(h, sb, 512); return sb.ToString(); }
+  // Raising must never be able to LOSE a window. This code only ever shows —
+  // there is no SW_HIDE / SW_MINIMIZE path anywhere in it. Someone's real work
+  // is running in these windows.
+  //
+  // SW_SHOWNORMAL (1), not SW_SHOW (5), for the not-visible case: a window whose
+  // WS_VISIBLE style bit has been cleared is NOT restored by SW_SHOW — only
+  // SW_SHOWNORMAL puts the bit back. A wt window can end up in that state, and
+  // SW_SHOW leaves it stranded and invisible with its sessions still running.
+  //
+  // ShowWindowAsync, not ShowWindow: ShowWindow blocks until the target window's
+  // thread pumps the message. A busy terminal can stall it, and we're called
+  // from a click handler that spawned us with a timeout.
+  public static void Raise(IntPtr h){
+    if(!IsWindowVisible(h)){ ShowWindowAsync(h, 1); }        // SW_SHOWNORMAL — un-hide
+    else if(IsIconic(h)){ ShowWindowAsync(h, 9); }           // SW_RESTORE — un-minimize
+    IntPtr fg = GetForegroundWindow();
+    uint dummy; uint fgThread = GetWindowThreadProcessId(fg, out dummy);
+    uint myThread = GetCurrentThreadId();
+    bool attached = false;
+    try {
+      // SetForegroundWindow loses to Windows' foreground lock when called from a
+      // background process; briefly sharing input state with the current
+      // foreground thread is the canonical workaround.
+      if(fgThread != myThread){ attached = AttachThreadInput(myThread, fgThread, true); }
+      BringWindowToTop(h);
+      SetForegroundWindow(h);
+    } finally {
+      // Always detach, even if the calls above throw. A leaked attachment ties
+      // our input queue to another process's and makes focus behave bizarrely.
+      if(attached){ AttachThreadInput(myThread, fgThread, false); }
+    }
+  }
+}
+"@
+$wt = @{}
+Get-Process -Name WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object { $wt[[uint32]$_.Id] = $true }
+$count = 0
+# Normalise a tab/window title down to its bare project name before comparing.
+# Titles arrive decorated: Claude/Codex rename their tab to "<spinner> <project>",
+# and the live-log windows use "<project> - live".
+#
+# This used to be a .Contains() substring test, which over-matched every project
+# that PREFIXES another: "lunar leads landing".Contains("lunar leads") is $true,
+# so raising one project also selected and raised the other's tabs. Each extra
+# match runs Raise() -> AttachThreadInput + SetForegroundWindow against a live
+# terminal, and a burst of forced focus changes makes a full-screen TUI emit
+# focus/DEC reply sequences into its own input stream. Compare whole names.
+function CDNorm($s){
+  if($null -eq $s){ return '' }
+  $t = [string]$s
+  $t = $t -replace '^[^\p{L}\p{N}]+', ''        # leading spinner / glyph decoration
+  $t = $t -replace '\s+[-–—]\s+live$', ''  # trailing " - live"
+  return $t.Trim().ToLower()
+}
+$nl = CDNorm $needle
+$targets = @{}
+foreach($th in @(${psHandles})){ $targets[[string]$th] = $true }
+$raised = @{}
+function CDRaiseOnce($h){
+  $k = $h.ToInt64().ToString()
+  if(-not $raised.ContainsKey($k)){ [CDWin]::Raise($h); $raised[$k] = $true }
+}
+function CDSelectTab($t){
+  # Select the tab before raising, so the window comes up showing the session
+  # the user actually clicked.
+  try {
+    $sel = $t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    if($sel -ne $null){ $sel.Select() }
+  } catch { }
+}
+$tabCond = New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+  [System.Windows.Automation.ControlType]::TabItem)
+
+# Gather every real terminal window up front so matching can run in layers.
+$wins = @()
+foreach($h in [CDWin]::Candidates()){
+  if(-not $wt.ContainsKey([uint32][CDWin]::PidOf($h))){ continue }
+  $title = [CDWin]::Title($h)
+  if($title -eq ''){ continue }
+
+  # Each wt PROCESS also owns hidden helper windows that DO have titles —
+  # PopupHost, "DDE Server Window", MSCTFIME UI, Default IME. A real terminal
+  # window is the one with tabs. Identify by tabs, and never un-hide a window we
+  # couldn't identify: if UI Automation told us nothing AND it isn't on screen,
+  # leave it exactly as we found it — unless a launch explicitly tracked this
+  # handle as a session window, which is identification enough.
+  $tabs = $null
+  $el = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+  if($el -ne $null){
+    try { $tabs = $el.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCond) } catch { $tabs = $null }
+  }
+  $hasTabs = ($tabs -ne $null -and $tabs.Count -gt 0)
+  $isTarget = $targets.ContainsKey($h.ToInt64().ToString())
+  if(-not $hasTabs -and -not [CDWin]::Shown($h) -and -not $isTarget){ continue }
+  $wins += ,@{ H = $h; Title = $title; Tabs = $tabs; HasTabs = $hasTabs; IsTarget = $isTarget }
+}
+
+if($nl -eq ''){
+  # No needle = the global "open everything" action.
+  foreach($w in $wins){ CDRaiseOnce $w.H; $count++ }
+  Write-Output $count
+  exit
+}
+
+# Layer 1 — exact match. Match the window's TABS, not its title: a wt window
+# reports only its ACTIVE tab's title, so a window hosting four sessions
+# answers to exactly one project name — every other project's session looks
+# absent. Fall back to the window title when UI Automation gave us nothing (it
+# can fail on a still-painting window).
+foreach($w in $wins){
+  $matched = $false
+  if($w.HasTabs){
+    foreach($t in $w.Tabs){
+      $name = $t.Current.Name
+      if($name -ne $null -and (CDNorm $name) -eq $nl){
+        CDSelectTab $t
+        $matched = $true
+        $count++
+      }
+    }
+  }
+  if(-not $matched -and (CDNorm $w.Title) -eq $nl){ $matched = $true; $count++ }
+  if($matched){ CDRaiseOnce $w.H }
+}
+
+# Layer 2 — windows this project's launches were tracked into. Raised by
+# handle, so the CLI renaming its tab can never hide them.
+foreach($w in $wins){
+  if($w.IsTarget -and -not $raised.ContainsKey($w.H.ToInt64().ToString())){
+    CDRaiseOnce $w.H
+    $count++
+  }
+}
+
+# Layer 3 — loose containment, only when the strict layers raised nothing.
+# A decorated title ("<project> — fixing tests") still gets found; running
+# this last keeps the old prefix over-match confined to would-be-empty results.
+if($count -eq 0){
+  foreach($w in $wins){
+    $matched = $false
+    if($w.HasTabs){
+      foreach($t in $w.Tabs){
+        $name = $t.Current.Name
+        if($name -ne $null -and (CDNorm $name).Contains($nl)){
+          CDSelectTab $t
+          $matched = $true
+          $count++
+        }
+      }
+    }
+    if(-not $matched -and (CDNorm $w.Title).Contains($nl)){ $matched = $true; $count++ }
+    if($matched){ CDRaiseOnce $w.H }
+  }
+}
+Write-Output $count
+`;
+  const r = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+    { encoding: "utf8", windowsHide: true, timeout: 20000 }
+  );
+  const n = parseInt(String(r.stdout || "").trim().split(/\s+/).pop(), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Snapshot the handles of every currently-open Windows Terminal window, then
+// call cb(handles[]) (each an int64 string, stable system-wide). Async so it
+// never blocks the request loop. Used by the headless launch path to identify
+// which window is the one it just spawned — diffed against the windows present
+// afterwards, because Claude and Codex both overwrite the wt tab title (to
+// "<spinner> <project>") within a second of starting, so a title marker can't
+// pick out a brand-new window but "a handle that wasn't there a moment ago" can.
+//
+// NOT used for session liveness — see listSessionTabs. Windows are the wrong
+// unit there: several sessions share one window as tabs.
+function captureWtWindows(cb) {
+  const script =
+`$ErrorActionPreference='SilentlyContinue'
+Add-Type @"
+using System;using System.Collections.Generic;using System.Runtime.InteropServices;
+public class CDEnum{
+ public delegate bool EP(IntPtr h,IntPtr l);
+ [DllImport("user32.dll")] public static extern bool EnumWindows(EP cb,IntPtr l);
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
+ public static List<IntPtr> All(){var r=new List<IntPtr>();EnumWindows((h,l)=>{if(IsWindowVisible(h))r.Add(h);return true;},IntPtr.Zero);return r;}
+ public static uint Pid(IntPtr h){uint p;GetWindowThreadProcessId(h,out p);return p;}
+}
+"@
+$wt=@{}; Get-Process WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object { $wt[[uint32]$_.Id]=$true }
+foreach($h in [CDEnum]::All()){ if($wt.ContainsKey([uint32][CDEnum]::Pid($h))){ $h.ToInt64().ToString() } }`;
+  let out = "";
+  let done = false;
+  const finish = () => { if (done) return; done = true; try { cb(out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)); } catch {} };
+  try {
+    const p = spawn("powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"], shell: false });
+    p.stdout.on("data", (d) => { out += d; });
+    p.on("close", finish);
+    p.on("error", finish);
+    setTimeout(finish, 6000).unref?.();
+  } catch { finish(); }
+}
+
+// ── Session window handles ──────────────────────────────────────────────────
+// Claude/Codex rename their Windows Terminal tab within seconds of starting —
+// sometimes to a title that no longer contains the project name at all (just
+// "claude", or a summary of the task in flight). Title matching alone then
+// finds NOTHING, and the session badge answers "no terminals found" for a
+// session that is running right there. So every launch also records WHICH
+// window it created (by handle, diffed against a pre-launch snapshot — the
+// same trick minimizeNewWtWindow uses), and the badge's raise targets those
+// handles directly, immune to whatever the CLI renames its tab to.
+// slug → Map(handle → registeredAt).
+const sessionWindowsBySlug = new Map();
+const SESSION_HANDLE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function registerSessionWindows(slug, handles) {
+  if (!slug || !handles || !handles.length) return;
+  const m = sessionWindowsBySlug.get(slug) || new Map();
+  for (const h of handles) m.set(String(h), Date.now());
+  sessionWindowsBySlug.set(slug, m);
+}
+
+// Handles registered for a project, minus anything expired. Dead handles are
+// harmless — the raise script only touches handles that still belong to a
+// live WindowsTerminal process — so expiry is just housekeeping.
+function sessionWindowHandles(slug) {
+  const m = sessionWindowsBySlug.get(slug);
+  if (!m) return [];
+  const now = Date.now();
+  for (const [h, at] of m) if (now - at > SESSION_HANDLE_TTL_MS) m.delete(h);
+  if (m.size === 0) { sessionWindowsBySlug.delete(slug); return []; }
+  return Array.from(m.keys());
+}
+
+// Watch for the wt window a just-issued launch creates and file it under
+// `slug`. Window creation takes a couple of seconds, so poll the open-window
+// set a few times and register every handle not present in `baseline`.
+// Over-inclusion (an unrelated window opened in the same beat) is acceptable:
+// worst case the badge raises one extra window, versus finding nothing.
+function trackNewWindowForSlug(slug, baseline) {
+  if (!slug) return;
+  const base = new Set((baseline || []).map(String));
+  const delays = [1500, 4000, 9000];
+  const poll = (i) => {
+    if (i >= delays.length) return;
+    const t = setTimeout(() => {
+      captureWtWindows((now) => {
+        const fresh = (now || []).map(String).filter((h) => !base.has(h));
+        if (fresh.length) registerSessionWindows(slug, fresh);
+        else poll(i + 1);
+      });
+    }, delays[i]);
+    t.unref?.();
+  };
+  poll(0);
+}
+
+// ── Interactive CLI sessions ────────────────────────────────────────────────
+// A "send" (task) is tracked via in-progress task status, so its card already
+// lights up the session badge. Clicking a card's Claude/Codex button opens an
+// interactive terminal we'd otherwise not know about, so we register each one
+// here and the card's badge reads the per-project count.
+//
+// Liveness is TAB existence, not window existence. Windows Terminal puts several
+// sessions in ONE window as tabs (dragging tabs together is normal), and under
+// the old window-handle model that broke two ways: closing a single tab left the
+// window alive, so the badge never cleared; and dragging a tab into a different
+// window changed the handle, so the badge cleared for a session still running.
+// The user closes TABS, so tabs are what liveness means.
+//
+// id → { slug, basename, agent, startedAt }. Keyed by a counter, NOT a window
+// handle — handles stop being meaningful the moment a tab moves. Wiped on a
+// server restart: an interactive session has no on-disk log to re-scan, so after
+// a restart its badge clears even though the window is still open (unchanged
+// from before, and why the badge sometimes looks empty after an app update).
+const liveInteractiveSessions = new Map();
+let _sessionSeq = 0;
+
+// A just-launched session hasn't painted its tab yet — wt takes a beat. Pruning
+// inside this window would delete the session before its tab ever appeared, and
+// the badge would never show at all.
+const SESSION_TAB_GRACE_MS = 12000;
+
+// Tab titles usually carry the project folder name — both our own
+// `--title <basename>` and Claude/Codex's "<spinner> <project>" rename contain
+// it. Case-insensitive substring. The CLIs sometimes retitle further (to just
+// "claude", or a task summary) — the tracked window handles cover that case,
+// both here (pruning) and in the badge's raise.
+function tabTitleMatches(title, basename) {
+  if (!title || !basename) return false;
+  return String(title).toLowerCase().includes(String(basename).toLowerCase());
+}
+
+// Every Windows Terminal TAB title currently open. UI Automation is the only way
+// to see individual tabs — Win32 exposes one title per window, its active tab's.
+function listSessionTabs() {
+  return new Promise((resolve) => {
+    const script =
+`$ErrorActionPreference='SilentlyContinue'
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type @"
+using System;using System.Collections.Generic;using System.Runtime.InteropServices;using System.Text;
+public class CDTabs{
+ public delegate bool EP(IntPtr h,IntPtr l);
+ [DllImport("user32.dll")] public static extern bool EnumWindows(EP cb,IntPtr l);
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
+ public static List<IntPtr> All(){var r=new List<IntPtr>();EnumWindows((h,l)=>{r.Add(h);return true;},IntPtr.Zero);return r;}
+ public static uint Pid(IntPtr h){uint p;GetWindowThreadProcessId(h,out p);return p;}
+ public static string T(IntPtr h){var s=new StringBuilder(512);GetWindowText(h,s,512);return s.ToString();}
+}
+"@
+$wt=@{}; Get-Process WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object { $wt[[uint32]$_.Id]=$true }
+$cond = New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+  [System.Windows.Automation.ControlType]::TabItem)
+foreach($h in [CDTabs]::All()){
+  if(-not $wt.ContainsKey([uint32][CDTabs]::Pid($h))){ continue }
+  if(([CDTabs]::T($h)) -eq ''){ continue }
+  $el = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+  if($el -eq $null){ continue }
+  try { foreach($t in $el.FindAll([System.Windows.Automation.TreeScope]::Descendants,$cond)){ $t.Current.Name } } catch { }
+}`;
+    let out = "";
+    let done = false;
+    // On ANY failure — timeout, UIA error, no output — resolve null rather than
+    // an empty list. Null means "couldn't tell", and the caller leaves sessions
+    // alone; an empty list would read as "every tab is gone" and wipe every
+    // badge the moment a scan hiccuped.
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      const tabs = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      resolve(ok && tabs.length ? tabs : null);
+    };
+    try {
+      const p = spawn("powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+        { windowsHide: true, stdio: ["ignore", "pipe", "ignore"], shell: false });
+      p.stdout.on("data", (d) => { out += d; });
+      p.on("close", (code) => finish(code === 0));
+      p.on("error", () => finish(false));
+      setTimeout(() => finish(false), 8000).unref?.();
+    } catch { finish(false); }
+  });
+}
+
+// Open Windows Terminal in `folder` running `cmd`, and register the new window
+// so the project's session badge reflects it. Forces `-w new` so a brand-new
+// window (hence a brand-new handle) reliably appears for the baseline diff to
+// find — and so closing this session's window can't take an unrelated tab with
+// it. Titled with the folder basename so the badge's raise (focusTerminalWindows,
+// matched by basename) brings exactly this window forward. `cmd /k` keeps the
+// shell open if the CLI exits or isn't on PATH, identical to spawnTerminal.
+function spawnTrackedTerminal(folder, cmd, { slug, agent }) {
+  const base = (path.basename(folder) || "session").replace(/"/g, "");
+  // Snapshot the open wt windows first so the new window can be identified by
+  // handle afterwards (trackNewWindowForSlug) — that's what lets the session
+  // badge raise this exact window even after the CLI renames its tab.
+  captureWtWindows((baseline) => {
+    try {
+      spawn(
+        "cmd.exe",
+        ["/c", "start", "", "wt.exe", "-w", "new", "-d", folder, "--title", base, "cmd", "/k", cmd],
+        { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+      ).unref();
+    } catch {
+      return;   // nothing launched, so nothing to track
+    }
+    trackNewWindowForSlug(slug, baseline);
+    // Register immediately rather than waiting on the handle diff. If wt never
+    // actually opens, no tab will ever match this basename and the next prune
+    // (after the grace period) drops it — the badge self-corrects instead of
+    // needing a second window scan to confirm the launch.
+    liveInteractiveSessions.set(++_sessionSeq, {
+      slug,
+      basename: base,
+      agent,
+      startedAt: Date.now(),
+    });
+  });
+}
+
+// Drop any registered interactive session whose window has been closed, so the
+// badge clears when the user exits/closes the terminal. Resolves immediately
+// when nothing is tracked (no PowerShell spawned). Called before each
+// /api/projects response so the count the card reads is always current.
+async function pruneInteractiveSessions() {
+  if (liveInteractiveSessions.size === 0) return;
+  const tabs = await listSessionTabs();
+  // null = the scan failed, not "no tabs open". Leave every session alone; a
+  // flaky scan must never wipe badges for sessions that are still running.
+  if (tabs === null) return;
+
+  // Live window handles are the second liveness signal: Claude/Codex can
+  // retitle their tab to something with no project name in it, and a
+  // title-only census would prune a session that is still running.
+  const liveHandles = await new Promise((resolve) =>
+    captureWtWindows((h) => resolve(new Set((h || []).map(String))))
+  );
+
+  const now = Date.now();
+  // Group by basename: two sessions on the same project produce two tabs with
+  // the same title, so they can only be reconciled as a group.
+  const byBase = new Map();
+  for (const [id, s] of liveInteractiveSessions) {
+    if (!byBase.has(s.basename)) byBase.set(s.basename, []);
+    byBase.get(s.basename).push([id, s]);
+  }
+
+  for (const [base, entries] of byBase) {
+    const openTabs = tabs.filter((t) => tabTitleMatches(t, base)).length;
+    // Tracked windows still open for this group's project(s). max() with the
+    // tab count, never a sum — a titled tab usually LIVES in a tracked window,
+    // and double-counting would keep dead sessions on the badge forever.
+    let handleAlive = 0;
+    for (const sl of new Set(entries.map(([, s]) => s.slug))) {
+      for (const h of sessionWindowHandles(sl)) if (liveHandles.has(h)) handleAlive++;
+    }
+    // Newest first, so when tabs close it's the oldest session that's dropped
+    // and a just-launched one is never the casualty.
+    entries.sort((a, b) => b[1].startedAt - a[1].startedAt);
+    let slots = Math.max(openTabs, handleAlive);
+    for (const [id, s] of entries) {
+      if (now - s.startedAt < SESSION_TAB_GRACE_MS) continue;   // tab may not exist yet
+      if (slots > 0) { slots--; continue; }                      // still has a tab
+      liveInteractiveSessions.delete(id);                        // its tab is gone
+    }
+  }
+}
+
+// How many interactive sessions are live for one project (its card badge count).
+function liveInteractiveCount(slug) {
+  let n = 0;
+  for (const s of liveInteractiveSessions.values()) if (s.slug === slug) n++;
+  return n;
+}
+
+// Minimize the ONE Windows Terminal window that appeared after `baseline` was
+// snapshotted — i.e. the session we just launched — re-applying for ~9s because
+// wt restores its own window during startup (a single SW_MINIMIZE gets undone).
+// Identifying the window by handle-diff (not title) survives Claude/Codex
+// renaming the tab. A loose title guard ("* <proj>", "claude", "codex", or our
+// own marker) avoids minimizing some unrelated wt window the user opens in the
+// same few seconds. Stops early once it has been confirmed minimized twice in a
+// row. Fire-and-forget: spawns a hidden, detached PowerShell and returns at once.
+function minimizeNewWtWindow(baseline, basename) {
+  const base = String(basename || "").toLowerCase().replace(/'/g, "''");
+  const baseList = (Array.isArray(baseline) ? baseline : [])
+    .map((h) => String(h).replace(/[^0-9-]/g, ""))
+    .filter(Boolean)
+    .map((h) => `'${h}'`)
+    .join(",");
+  const scriptBody =
+`Add-Type @"
+using System;using System.Collections.Generic;using System.Runtime.InteropServices;using System.Text;
+public class CDMinW{
+ public delegate bool EP(IntPtr h,IntPtr l);
+ [DllImport("user32.dll")] public static extern bool EnumWindows(EP cb,IntPtr l);
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int n);
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
+ public static List<IntPtr> All(){var r=new List<IntPtr>();EnumWindows((h,l)=>{if(IsWindowVisible(h))r.Add(h);return true;},IntPtr.Zero);return r;}
+ public static uint Pid(IntPtr h){uint p;GetWindowThreadProcessId(h,out p);return p;}
+ public static string T(IntPtr h){var s=new StringBuilder(512);GetWindowText(h,s,512);return s.ToString();}
+}
+"@
+$baseline = @(${baseList || "''"})
+$base = '${base}'
+$done = 0
+for($i=0; $i -lt 45 -and $done -lt 2; $i++){
+  Start-Sleep -Milliseconds 200
+  $wt=@{}; Get-Process WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object { $wt[[uint32]$_.Id]=$true }
+  foreach($h in [CDMinW]::All()){
+    if(-not $wt.ContainsKey([uint32][CDMinW]::Pid($h))){ continue }
+    if($baseline -contains $h.ToInt64().ToString()){ continue }
+    $t = ([CDMinW]::T($h)).ToLower()
+    if((($base.Length -gt 0) -and $t.Contains($base)) -or $t.Contains('claude') -or $t.Contains('codex') -or $t.Contains('background')){
+      if([CDMinW]::IsIconic($h)){ $done++ } else { [CDMinW]::ShowWindow($h,6) | Out-Null; $done=0 }
+    }
+  }
+}
+`;
+  let scriptFile;
+  try {
+    scriptFile = path.join(DATA_DIR, `task-min-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.ps1`);
+    fs.writeFileSync(scriptFile, "﻿" + scriptBody, "utf8");
+  } catch { return; }
+  try {
+    spawn(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", scriptFile],
+      { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+    ).unref();
+  } catch {}
 }
 
 // Open the project folder as a NEW Code session in the Claude *desktop app*
@@ -1644,6 +3147,124 @@ const AI_AUTONOMY_FLAGS = {
   codex: "--dangerously-bypass-approvals-and-sandbox",
 };
 
+// ─── Auto-accept (launch-prompt pre-seeding) ─────────────────────────────────
+// Both Claude Code and Codex gate first-run in a directory behind one-time
+// interactive prompts (folder trust, external CLAUDE.md imports, .mcp.json
+// servers, the bypass-permissions warning…). Those gates are INDEPENDENT of
+// the per-tool approval prompts, so neither `--permission-mode bypassPermissions`
+// (Claude) nor `--dangerously-bypass-approvals-and-sandbox` (Codex) suppresses
+// them — confirmed upstream (anthropics/claude-code#28506, openai/codex#14547).
+// The supported way to pre-answer them non-interactively is to write each
+// answer into the CLI's own config before we spawn it. We merge ONLY the keys
+// each prompt reads and leave everything else untouched, so the user's
+// existing config is preserved. Always on — launches from the dashboard are
+// meant to be hands-off, so every launch prompt is pre-accepted.
+const CLAUDE_CONFIG_PATH = path.join(os.homedir(), ".claude.json");
+const CODEX_CONFIG_PATH  = path.join(os.homedir(), ".codex", "config.toml");
+
+// Atomic write: temp file + rename, so a crash mid-write can never leave a
+// truncated ~/.claude.json (which would wipe the user's Claude state).
+function writeFileAtomic(target, contents) {
+  const tmp = `${target}.codingdrives.tmp`;
+  fs.writeFileSync(tmp, contents, "utf8");
+  fs.renameSync(tmp, target);
+}
+
+// Claude persists every one-time launch prompt in ~/.claude.json — project
+// keys are normalised to FORWARD slashes (e.g. "C:/Users/me/proj"). We
+// pre-answer ALL of them so a session launched from the dashboard never
+// stalls on an interactive question:
+//   • projects[<path>].hasTrustDialogAccepted — "Do you trust the files in
+//     this folder?"
+//   • projects[<path>].hasClaudeMdExternalIncludesApproved (+ …WarningShown) —
+//     "Allow external CLAUDE.md file imports?"
+//   • projects[<path>].enabledMcpjsonServers — "Use MCP servers from
+//     .mcp.json?" (asked per server; we enable ones not yet recorded, but a
+//     server the user explicitly disabled stays disabled)
+//   • bypassPermissionsModeAccepted (global) — the full-screen warning shown
+//     the first time Claude runs with --permission-mode bypassPermissions
+//   • hasCompletedOnboarding (global) — the theme/setup wizard on a fresh
+//     install, which would otherwise swallow the launch entirely
+// Returns true if anything changed.
+function trustFolderForClaude(folder) {
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(CLAUDE_CONFIG_PATH, "utf8")); } catch {}
+  if (!cfg || typeof cfg !== "object") cfg = {};
+  if (!cfg.projects || typeof cfg.projects !== "object") cfg.projects = {};
+  const key = folder.replace(/\\/g, "/");
+  const entry = (cfg.projects[key] && typeof cfg.projects[key] === "object")
+    ? cfg.projects[key] : {};
+  let changed = false;
+
+  for (const k of [
+    "hasTrustDialogAccepted",
+    "hasClaudeMdExternalIncludesApproved",
+    "hasClaudeMdExternalIncludesWarningShown",
+  ]) {
+    if (entry[k] !== true) { entry[k] = true; changed = true; }
+  }
+
+  for (const k of ["bypassPermissionsModeAccepted", "hasCompletedOnboarding"]) {
+    if (cfg[k] !== true) { cfg[k] = true; changed = true; }
+  }
+
+  try {
+    const mcp = JSON.parse(fs.readFileSync(path.join(folder, ".mcp.json"), "utf8"));
+    const names = Object.keys(mcp?.mcpServers || {});
+    if (names.length) {
+      const enabled  = Array.isArray(entry.enabledMcpjsonServers)  ? entry.enabledMcpjsonServers  : [];
+      const disabled = Array.isArray(entry.disabledMcpjsonServers) ? entry.disabledMcpjsonServers : [];
+      for (const name of names) {
+        if (!enabled.includes(name) && !disabled.includes(name)) {
+          enabled.push(name);
+          changed = true;
+        }
+      }
+      entry.enabledMcpjsonServers = enabled;
+    }
+  } catch {} // no .mcp.json (or unparsable) — nothing to pre-enable
+
+  if (!changed) return false; // every prompt already answered
+  cfg.projects[key] = entry;
+  writeFileAtomic(CLAUDE_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  return true;
+}
+
+// Codex stores trust as a TOML table `[projects.'<path>'] trust_level = "trusted"`
+// in ~/.codex/config.toml (backslash paths, single-quoted literal keys). TOML
+// forbids duplicate tables, so we only APPEND when the path isn't already
+// present — comparing case-insensitively and ignoring any `\\?\` long-path
+// prefix. Appending a fresh table at EOF is always valid and never disturbs
+// existing content. Returns true if we appended.
+function trustFolderForCodex(folder) {
+  let text = "";
+  try { text = fs.readFileSync(CODEX_CONFIG_PATH, "utf8"); } catch {}
+  const norm = (p) => String(p).replace(/^\\\\\?\\/, "").replace(/\//g, "\\").toLowerCase();
+  const target = norm(folder);
+  const re = /^\s*\[projects\.\s*(['"])(.*?)\1\s*\]/gm;
+  let m;
+  while ((m = re.exec(text))) {
+    if (norm(m[2]) === target) return false; // already configured
+  }
+  const block = `${text && !text.endsWith("\n") ? "\n" : ""}\n[projects.'${folder}']\ntrust_level = "trusted"\n`;
+  fs.mkdirSync(path.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs.appendFileSync(CODEX_CONFIG_PATH, block, "utf8");
+  return true;
+}
+
+// Pre-answer every launch prompt for the given CLI before spawning it.
+// Best-effort: any failure is logged and swallowed so a config hiccup never
+// blocks a launch — the CLI just falls back to its own (interactive) prompt
+// in that case.
+function ensureFolderTrusted(folder, cliKey) {
+  try {
+    if (cliKey === "claude") trustFolderForClaude(folder);
+    else if (cliKey === "codex") trustFolderForCodex(folder);
+  } catch (err) {
+    console.error("[auto-accept] failed for", cliKey, folder, "—", err.message);
+  }
+}
+
 app.post("/api/projects/:slug/open", async (req, res) => {
   const cfg = loadConfig();
   const folder = fromSlug(req.params.slug);
@@ -1680,16 +3301,30 @@ app.post("/api/projects/:slug/open", async (req, res) => {
     if (tool === "vscode") {
       spawnDetached(cfg.tools.vscode, [folder]);
     } else if (tool === "claude") {
+      // Pre-answer the CLI's one-time launch prompts so it never stops to
+      // ask (no-op when everything is already accepted).
+      ensureFolderTrusted(folder, "claude");
       if (claudeDesktop) {
         await openClaudeDesktop(folder);
       } else {
-        spawnTerminal(folder, `${cliCommandLine(resolveCliPath(cfg.tools.claude || "claude"))} ${AI_AUTONOMY_FLAGS.claude}`);
+        spawnTrackedTerminal(
+          folder,
+          `${cliCommandLine(resolveCliPath(cfg.tools.claude || "claude"))} ${AI_AUTONOMY_FLAGS.claude}`,
+          { slug: req.params.slug, agent: "claude" }
+        );
       }
     } else if (tool === "codex") {
+      // Codex's terminal TUI and `codex app` desktop launcher share the same
+      // config.toml trust table, so pre-trust covers both modes.
+      ensureFolderTrusted(folder, "codex");
       if (cfg.openCodexInDesktop === true) {
         spawnCodexDesktop(folder, cfg.tools.codex || "codex");
       } else {
-        spawnTerminal(folder, `${cliCommandLine(resolveCliPath(cfg.tools.codex || "codex"))} ${AI_AUTONOMY_FLAGS.codex}`);
+        spawnTrackedTerminal(
+          folder,
+          `${cliCommandLine(resolveCliPath(cfg.tools.codex || "codex"))} ${AI_AUTONOMY_FLAGS.codex}`,
+          { slug: req.params.slug, agent: "codex" }
+        );
       }
     } else if (tool === "explorer") {
       // Open the project folder in Windows Explorer. Earlier revisions tried
@@ -1915,6 +3550,9 @@ async function backupHandler(req, res) {
     // Re-write the marker after /MIR (it may have been pruned if source had no marker).
     if (ok) await writeBackupMarker(dest, slug, name, folder).catch(() => {});
     if (ok) {
+      // Swallow a bookkeeping failure rather than reject: `responded` is
+      // already true, so a throw here would leave the request hanging with
+      // no response even though the mirror itself succeeded.
       await updateDB((db2) => {
         db2[slug] = {
           ...(db2[slug] || {}),
@@ -1922,7 +3560,7 @@ async function backupHandler(req, res) {
           lastBackedUpDest: dest,
           updatedAt: new Date().toISOString(),
         };
-      });
+      }).catch((err) => console.error("[backup] timestamp write failed —", err?.message || err));
     }
     let errorMessage;
     if (!ok) {
@@ -3143,6 +4781,7 @@ const OVERWRITE_PROMPT =
   "Only update README.md if a section is now demonstrably stale (e.g. install command changed). Do NOT regenerate the whole README. Do NOT add new files unless the user clearly added a new ecosystem (e.g. Python files appeared in a Node repo and there's no Python in .github/dependabot.yml — then add one). " +
 
   "PHASE 4 — COMMIT + PUSH. " +
+  "If the folder is not a git repo (`git init -b main`) or has no origin remote (`git remote add origin {{REPO_URL}}.git`), wire it up and `git fetch origin` first. If local HEAD does not contain the remote default branch's history (`git merge-base` fails — fresh local repo over an already-published project), adopt the published history: `git reset --soft origin/<default>` keeps the local files untouched while the next commit lands on top of the published branch. Then check `git status` for staged deletions of files that only exist on the published repo (README.md, LICENSE, .github/, etc. from an earlier publish) and `git restore --source=origin/<default> --staged --worktree -- <path>` them rather than deleting. " +
   "`git add .`. Single commit, short imperative summary (e.g. 'Fix login error', 'Refactor backup pipeline', 'Update README'). `git push origin HEAD`. If push is rejected because the remote moved ahead, `git pull --rebase origin HEAD`, resolve any conflicts (don't drop the user's local changes — ask if uncertain), then push. " +
 
   "PHASE 5 — REPORT. " +
@@ -3152,32 +4791,52 @@ const OVERWRITE_PROMPT =
   "Files changed: <N>\n" +
   "Then STOP. Do not create a release tag (that's a separate flow). Do not change visibility. Do not delete files unless the local working copy removed them.";
 
-// Re-publish + cut a new versioned release. Same commit/push as
-// OVERWRITE_PROMPT, plus a tagged release with auto-generated notes.
+// Re-publish + cut a new versioned release: adopt the published history if
+// needed, bump the version, write DETAILED notes from the actual diff between
+// what's published and what's local, build a release package, and upload it
+// as a release asset. The local folder is always the source of truth for
+// CONTENT; published history is preserved by committing on top of it.
 const RELEASE_PROMPT =
-  "You are cutting a new versioned release of this project on GitHub. Pick the right version, update version files, push, and create the release with clean notes. " +
+  "You are cutting a new versioned release of this project on GitHub. The local folder is the source of truth for content. You must end with a tagged release that has (a) DETAILED notes describing everything that changed versus the previously published version and (b) an attached downloadable release package. " +
   "Inputs: project folder = current directory; repo = {{REPO_URL}}. " +
 
-  "PHASE 1 — STATE OF THE WORLD. " +
-  "Run `git log --oneline -n 30`, `gh release list --limit 5`, and read the current version (package.json#version, pyproject.toml's [project].version or [tool.poetry].version, Cargo.toml's [package].version, the version constant in __init__.py, etc.). Identify the version file(s) for this stack. " +
+  "PHASE 1 — CONNECT TO THE PUBLISHED REPO. " +
+  "If this folder is not a git repo, run `git init -b main`. If it has no `origin` remote, `git remote add origin {{REPO_URL}}.git`. `git fetch origin` and note the remote default branch (call it BASE, usually origin/main). " +
+  "If local HEAD does not contain BASE's history (fresh local repo over an already-published project — `git merge-base HEAD <BASE>` fails or errors), ADOPT the published history instead of fighting it: commit or stash any dirty state, then `git reset --soft <BASE>` — this keeps the local files exactly as they are while moving history onto the published branch, so the next commit is a clean 'everything that changed' commit on top of it. NEVER start with a force-push. " +
+  "After adopting, check `git status` for staged deletions: files that exist on the published repo but not in this folder are usually scaffolding an earlier publish added (README.md, LICENSE, .github/, CONTRIBUTING.md, SECURITY.md, CHANGELOG.md). RESTORE those instead of deleting them — `git restore --source=<BASE> --staged --worktree -- <path>` — then update any that are stale. Only keep a deletion when it is clearly project code the user removed on purpose. " +
 
-  "PHASE 2 — PICK THE VERSION. " +
-  "Apply semver to the commits since the last release: patch for bug fixes, minor for backward-compatible features, major for breaking changes. State the proposed version and a one-line reason. " +
+  "PHASE 2 — STATE OF THE WORLD. " +
+  "Run `git log --oneline -n 30`, `gh release list --limit 5`, and read the current version (package.json#version, pyproject.toml [project].version, Cargo.toml [package].version, __init__.py constant, etc.). Identify every file that carries the version for this stack. Set LAST = the latest release's tag if one exists, otherwise <BASE>; every comparison below is LAST vs the local tree. " +
 
-  "PHASE 3 — UPDATE VERSION + CHANGELOG. " +
-  "Bump the version in every relevant file (package.json + lockfile if present, pyproject.toml, Cargo.toml, etc.). If CHANGELOG.md exists, prepend a new ## v<version> — <date> section with one bullet per notable commit (grouped: Added / Changed / Fixed / Removed). If no CHANGELOG.md exists, create one in Keep-a-Changelog style. " +
+  "PHASE 3 — PICK THE VERSION. " +
+  "Apply semver to what changed since LAST: patch for fixes, minor for backward-compatible features, major for breaking changes. State the proposed version and a one-line reason. " +
 
-  "PHASE 4 — SECRET SCAN. " +
-  "Grep the tree for sk-..., sk-ant-..., ghp_..., github_pat_..., AKIA..., xox[bpoars]-, AIza..., PEM headers. STOP if any match. " +
+  "PHASE 4 — DETAILED CHANGE NOTES (the heart of this job). " +
+  "Compare the published state to the new upload: `git diff --stat LAST` (or LAST..HEAD once committed) for the file-level summary and `git log --oneline LAST..HEAD` for commits, plus your own reading of the important diffs. Write RELEASE_NOTES.md (temp file, do not commit it) containing, in this order: " +
+  "(1) '## What changed' — grouped bullets (Added / Changed / Fixed / Removed), one bullet per real user-facing change, written from the diffs themselves, specific enough that a reader knows exactly what is different in this upload versus the previous one; " +
+  "(2) '## Commits' — the `git log --oneline LAST..HEAD` list; " +
+  "(3) '## Files changed' — the diff --stat summary with the totals line (N files changed, X insertions, Y deletions). " +
+  "Also prepend the same '## v<version> — <date>' grouped bullets to CHANGELOG.md (create it Keep-a-Changelog style if missing — this one IS committed). " +
 
-  "PHASE 5 — COMMIT, PUSH, TAG. " +
-  "`git add .`, commit with 'Release v<version>', `git push origin HEAD`. Then `gh release create v<version> --title v<version> --generate-notes`. If you already wrote a CHANGELOG entry, pass it via `--notes-file` instead of --generate-notes. " +
+  "PHASE 5 — SECRET SCAN. " +
+  "Grep the tree for sk-..., sk-ant-..., ghp_..., github_pat_..., AKIA..., xox[bpoars]-, AIza..., PEM headers. STOP and report if any match. " +
 
-  "PHASE 6 — REPORT. " +
+  "PHASE 6 — VERSION BUMP, COMMIT, PUSH. " +
+  "Bump the version in every relevant file (package.json + lockfile, pyproject.toml, Cargo.toml, etc.). `git add .`, commit 'Release v<version>', `git push origin HEAD`. If rejected because the remote moved, `git pull --rebase origin HEAD` then push; only if the histories genuinely cannot be reconciled explain why and use `git push --force-with-lease origin HEAD` as the last resort. " +
+
+  "PHASE 7 — BUILD THE RELEASE PACKAGE. " +
+  "Every release must carry a downloadable package. Detect the stack's build and produce the distributable AFTER the version bump so the artifact carries the new version: e.g. `npm run build` / `dotnet publish -c Release` / `cargo build --release` / `python -m build`. Prefer real installers/binaries the build produces (setup .exe/.msi, wheel, crate binary); otherwise zip the build output folder (dist/build/out — never node_modules or .git) as <repo>-v<version>-win.zip. If the project genuinely has no build step, package a clean source snapshot via `git archive -o <repo>-v<version>-src.zip HEAD`. " +
+
+  "PHASE 8 — CREATE THE RELEASE + UPLOAD. " +
+  "`gh release create v<version> --title v<version> --notes-file RELEASE_NOTES.md <package path(s)>`. Then VERIFY with `gh release view v<version>` that the release exists and the asset(s) are listed; if an upload failed, retry once with `gh release upload v<version> <path>`. " +
+
+  "PHASE 9 — REPORT. " +
   "Print on its own lines:\n" +
   "Repo: {{REPO_URL}}\n" +
   "Release: {{REPO_URL}}/releases/tag/v<version>\n" +
   "Version bumped: <old> → <new>\n" +
+  "Assets uploaded: <comma-separated file names>\n" +
+  "Changes: <N files changed, X insertions, Y deletions since previous upload>\n" +
   "Then STOP. Do not change visibility. Do not push extra commits.";
 
 // Launches the user's chosen CLI in Windows Terminal at `folder`, with the
@@ -3193,12 +4852,12 @@ const RELEASE_PROMPT =
 // touches cmd.exe's parser (quotes/&/parens in prompts used to shatter the
 // argument mid-chain). The relay line itself contains only single quotes,
 // which every layer of the chain passes through verbatim.
-function spawnAiPrompt(folder, cliExecutable, prompt, cliKey) {
+function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false, slug = "" } = {}) {
   const exe = resolveCliPath(cliExecutable);
-  // Prune relay files from earlier sends (anything older than an hour).
+  // Prune relay files + headless session logs from earlier sends (older than an hour).
   try {
     for (const f of fs.readdirSync(DATA_DIR)) {
-      if (!/^task-prompt-.*\.txt$/.test(f)) continue;
+      if (!/^task-prompt-.*\.txt$/.test(f) && !/^task-session-.*\.log$/.test(f) && !/^task-min-.*\.ps1$/.test(f)) continue;
       const full = path.join(DATA_DIR, f);
       try {
         if (Date.now() - fs.statSync(full).mtimeMs > 60 * 60 * 1000) fs.unlinkSync(full);
@@ -3209,13 +4868,69 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey) {
   // BOM so Windows PowerShell 5.1 decodes the file as UTF-8 (em-dashes, emoji).
   fs.writeFileSync(file, "\uFEFF" + prompt, "utf8");
   const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
+
+  // Headless mode (Settings \u2192 "Headless background terminals"): run the CLI in
+  // its non-interactive form inside a HIDDEN PowerShell \u2014 no Windows Terminal
+  // window, no -NoExit. The CLI runs the prompt to completion (still firing the
+  // ack/report curls embedded in the prompt) and then exits, so the PowerShell
+  // host exits with it and nothing lingers in the background. The dashboard's
+  // task status is the user's window into progress; the staleness sweep marks a
+  // task failed if the hidden session dies without reporting.
+  if (headless) {
+    // "Headless background" no longer means windowless. The user wants to click
+    // the session badge and WATCH the live Claude/Codex session - exactly like
+    // clicking Claude/Codex directly - which a windowless `-p`/`exec` process
+    // (output only to a log file) can never show. So a headless task now opens
+    // the SAME real interactive session as visible mode (full live TUI, raisable
+    // by the card's session badge), just started MINIMIZED so it stays tucked in
+    // the taskbar instead of grabbing focus. Folder trust is pre-seeded by
+    // ensureFolderTrusted before we get here, so the interactive CLI (no `-p`)
+    // never stops on the trust prompt.
+    const flags = AI_AUTONOMY_FLAGS[cliKey] || "";
+    const ps = `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
+    const base = (path.basename(folder) || "AI session").replace(/"/g, "");
+    // Snapshot the open wt windows BEFORE launching, then open a fresh window
+    // (-w new) and minimize whichever window is new. Identifying it by handle
+    // (not title) is what makes this reliable: Claude/Codex rename the wt tab to
+    // "* <project>" within a second, so a title marker can't find our window,
+    // but a "handle that wasn't there a moment ago" can. The badge raises it
+    // later via focusTerminalWindows (which matches the settled "* <project>"
+    // title by basename), exactly like a visible session.
+    captureWtWindows((baseline) => {
+      try {
+        spawn(
+          "cmd.exe",
+          ["/c", "start", "", "wt.exe", "-w", "new", "-d", folder, "--title", base, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+          { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+        ).unref();
+      } catch {}
+      minimizeNewWtWindow(baseline, base);
+      // Remember which window this session lives in so the badge can raise it
+      // by handle even after Claude/Codex retitle the tab beyond recognition.
+      trackNewWindowForSlug(slug, baseline);
+    });
+    return;
+  }
+
+  // Visible mode (default): a Windows Terminal tab kept open with -NoExit so the
+  // user can watch the interactive session and see any error if the CLI exits.
+  // The tab is titled with the project name so the user can tell sessions apart
+  // when the session badge raises several windows at once (double-quotes
+  // stripped so the title can't break out of wt's argument). Snapshot-then-spawn
+  // so the new window's handle gets filed under this slug for the badge's raise.
   const flags = AI_AUTONOMY_FLAGS[cliKey] || "";
   const ps = `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
-  return spawn(
-    "cmd.exe",
-    ["/c", "start", "", "wt.exe", "-d", folder, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
-    { detached: true, stdio: "ignore", windowsHide: true, shell: false }
-  ).unref();
+  const winTitle = (path.basename(folder) || "AI session").replace(/"/g, "");
+  captureWtWindows((baseline) => {
+    try {
+      spawn(
+        "cmd.exe",
+        ["/c", "start", "", "wt.exe", "-d", folder, "--title", winTitle, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+        { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+      ).unref();
+    } catch {}
+    trackNewWindowForSlug(slug, baseline);
+  });
 }
 
 // POST /api/projects/:slug/github/ai-launch
@@ -3245,10 +4960,28 @@ app.post("/api/projects/:slug/github/ai-launch", async (req, res) => {
   if (!repoName) return res.status(400).json({ error: "repoName required" });
 
   // For re-publish modes the repo URL is required so the prompt can show
-  // the user (and the CLI) which repo we are about to update.
-  const repoUrl = mode === "initial" ? "" : (detectGithubUrl(folder) || "");
-  if (mode !== "initial" && !repoUrl) {
-    return res.status(400).json({ error: "Project has no GitHub remote. Publish first." });
+  // the user (and the CLI) which repo we are about to update. Detection is
+  // layered so an already-published project is ALWAYS found:
+  //   1. the project folder's own origin remote,
+  //   2. the repo a previous publish recorded (githubPrep.repoUrl — the
+  //      mirror pipeline publishes from a copy, so the folder has no origin),
+  //   3. a repo with this project's name on the signed-in GitHub account.
+  let repoUrl = "";
+  if (mode !== "initial") {
+    repoUrl = detectGithubUrl(folder) || "";
+    if (!repoUrl) {
+      const db = await readDB();
+      repoUrl = db[req.params.slug]?.githubPrep?.repoUrl || "";
+    }
+    if (!repoUrl) {
+      const probe = await runCapture("gh", ["repo", "view", repoName, "--json", "url", "-q", ".url"]);
+      if (probe.code === 0 && /^https:\/\/github\.com\//.test(probe.stdout.trim())) {
+        repoUrl = probe.stdout.trim();
+      }
+    }
+    if (!repoUrl) {
+      return res.status(400).json({ error: "No GitHub repo found for this project. Publish it first." });
+    }
   }
 
   const cfg = loadConfig();
@@ -3279,52 +5012,22 @@ app.post("/api/projects/:slug/github/ai-launch", async (req, res) => {
     .replace(/\{\{REPO_URL\}\}/g, repoUrl);
 
   try {
-    spawnAiPrompt(folder, cliExecutable, prompt, cliKey);
+    ensureFolderTrusted(folder, cliKey);
+    spawnAiPrompt(folder, cliExecutable, prompt, cliKey, {
+      headless: cfg.headlessTerminals === true,
+      slug: req.params.slug,
+    });
     res.json({ ok: true, cli: cliKey, repoName, visibility, mode });
   } catch (err) {
     res.status(500).json({ error: err.message || String(err) });
   }
 });
 
-// POST /api/projects/:slug/github/release
-// Body: { tag: string, title?: string, notes?: string, autoNotes?: boolean }
-// Runs `gh release create <tag>` in the project folder. Project must already
-// be a git repo with a github.com remote (auto-detected via githubUrl).
-app.post("/api/projects/:slug/github/release", async (req, res) => {
-  const folder = fromSlug(req.params.slug);
-  if (!fs.existsSync(folder)) return res.status(404).json({ error: "folder not found" });
-
-  const tag = String(req.body?.tag || "").trim();
-  if (!tag) return res.status(400).json({ error: "tag required (e.g., v1.0.1)" });
-  const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
-  const notes = typeof req.body?.notes === "string" ? req.body.notes : "";
-  const autoNotes = !!req.body?.autoNotes;
-
-  // Sanity: project must have a github.com origin already.
-  if (!detectGithubUrl(folder)) {
-    return res.status(400).json({ error: "Project has no GitHub remote. Publish first." });
-  }
-
-  const args = ["release", "create", tag];
-  if (title) args.push("--title", title);
-  if (autoNotes) args.push("--generate-notes");
-  else if (notes) args.push("--notes", notes);
-  else args.push("--generate-notes"); // sensible default
-
-  const r = await runCapture("gh", args, { cwd: folder });
-  if (r.code !== 0) {
-    return res.status(500).json({ error: (r.stderr || r.stdout || `gh exit ${r.code}`).trim() });
-  }
-  // gh release create prints the release URL on stdout when successful.
-  const releaseUrl = (r.stdout || "").trim().split(/\s+/).find((s) => /^https?:\/\//.test(s)) || null;
-  res.json({ ok: true, tag, releaseUrl });
-});
-
 // ─── Boot ───────────────────────────────────────────────────────────────────
 const cfg = loadConfig();
 await syncDesignSystem(cfg);
 await ensureDataDir();
-await migrateStatusDB();
+await migrateDB();
 // Bind explicitly to loopback. Default (0.0.0.0) would expose the API — which
 // can spawn robocopy, run git commands, and open arbitrary paths — to any host
 // on the same LAN. The Electron window always hits 127.0.0.1, so there is no
@@ -3340,3 +5043,11 @@ await new Promise((resolve, reject) => {
   });
   server.on("error", reject);
 });
+
+// ─── Scheduler ───────────────────────────────────────────────────────────────
+// One boot sweep (catches up anything that came due while the PC/app was off),
+// then a 30s ticker for the rest of the session. The reentrancy guard inside
+// runDueSchedules makes overlapping calls safe. A short boot delay lets the
+// folder scan / DS sync settle before the first fire.
+setTimeout(() => { runDueSchedules("boot").catch(() => {}); }, 4000);
+setInterval(() => { runDueSchedules("tick").catch(() => {}); }, 30 * 1000);

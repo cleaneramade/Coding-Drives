@@ -51,18 +51,6 @@ const ghError      = document.getElementById("gh-error");
 const ghStatus     = document.getElementById("gh-status");
 const ghSubmit     = document.getElementById("gh-submit");
 
-// Publish New Release modal (only opened when a project already has an
-// origin pointing at github.com, surfaced via project.githubUrl).
-const relModal     = document.getElementById("modal-release");
-const relTarget    = document.getElementById("rel-target");
-const relTag       = document.getElementById("rel-tag");
-const relTitle     = document.getElementById("rel-title");
-const relAuto      = document.getElementById("rel-auto");
-const relNotesWrap = document.getElementById("rel-notes-wrap");
-const relNotes     = document.getElementById("rel-notes");
-const relError     = document.getElementById("rel-error");
-const relSubmit    = document.getElementById("rel-submit");
-
 // In-card menu (the 3-dot button flips the card into this list of options)
 const cardMenuTpl = document.getElementById("card-menu-template");
 
@@ -136,6 +124,38 @@ function fmtDuration(ms) {
 // existing status-pill rules, OR a hex string like "#fbbf24". In the hex case
 // we set inline styles using the hex (with computed soft alpha for bg).
 function isHex(c) { return typeof c === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c); }
+
+// Colors offered by Settings → Statuses. Tokens, not free hex: they track the
+// design system through theme changes, and every .status-pill rule is already
+// keyed on these names. Legacy hex still renders (applyStatusColor handles it)
+// — it just isn't offered for new picks.
+const STATUS_COLOR_TOKENS = ["brand", "success", "warning", "danger", "info", "muted", "archived"];
+const STATUS_SWATCH_CSS = {
+  brand:    "var(--brand-500)",
+  success:  "var(--success)",
+  warning:  "var(--warning)",
+  danger:   "var(--danger)",
+  info:     "var(--info)",
+  muted:    "var(--fg-3)",
+  archived: "#a1a1aa",   // matches the archived pill rule in app.css
+};
+function statusSwatchColor(color) {
+  if (isHex(color)) return color;
+  return STATUS_SWATCH_CSS[color] || "var(--fg-3)";
+}
+
+// projects.json stores status ids, so an id is generated once at creation and
+// never changes — renaming a status only touches its label. Rewriting an id
+// would strand every project still pointing at the old one.
+function makeStatusId(label, taken) {
+  const base = label.trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "status";
+  let id = base;
+  let n = 2;
+  while (taken.has(id)) id = `${base}-${n++}`;
+  return id;
+}
 function applyStatusColor(el, color, selected) {
   // Reset any previous inline overrides + data-color
   el.style.background = "";
@@ -327,7 +347,14 @@ function renderChips() {
     btn.dataset.id = item.id;
     btn.setAttribute("role", "tab");
     btn.setAttribute("aria-selected", item.id === activeStatus ? "true" : "false");
-    btn.innerHTML = `<span>${item.label}</span><span class="count">${item.count}</span>`;
+    // textContent, not innerHTML — status labels are user-editable in
+    // Settings, and markup typed there must render as text, not as HTML.
+    const labelEl = document.createElement("span");
+    labelEl.textContent = item.label;
+    const countEl = document.createElement("span");
+    countEl.className = "count";
+    countEl.textContent = item.count;
+    btn.append(labelEl, countEl);
     btn.addEventListener("click", () => setActiveStatus(item.id));
     chipRow.appendChild(btn);
   }
@@ -335,12 +362,19 @@ function renderChips() {
 
 // ── Render: card grid ─────────────────────────────────────────────────────
 function renderGrid() {
-  // Close any open in-card menu BEFORE wiping the grid — otherwise the stale
-  // card node (including its menu-view listeners) is detached but kept alive
-  // by closures in dispatchCardMenuAction, leaking one subtree per re-render
-  // while a menu is open.
+  // Close any open in-card menu BEFORE the grid is wiped (in bucketCards) —
+  // otherwise the stale card node (including its menu-view listeners) is
+  // detached but kept alive by closures in dispatchCardMenuAction, leaking
+  // one subtree per re-render while a menu is open.
+  //
+  // NOTE: the grid is deliberately NOT wiped here. It used to be, and that was
+  // the scroll-jump bug: with the grid emptied up front, bucketCards' column
+  // measurement (gridColumnCount reads grid.clientWidth) forced a layout pass
+  // against an EMPTY grid — the page height collapsed, the browser clamped the
+  // scroll position toward the top, and every 8s poll repaint yanked the user
+  // up the page. bucketCards wipes immediately before refilling instead, with
+  // no layout read in between, so the collapsed state is never laid out.
   closeAllCardMenus();
-  grid.innerHTML = "";
   const q = query.trim().toLowerCase();
   const filtered = projects.filter((p) => {
     // Default: hide archived from "All" — only show under the explicit Archived chip.
@@ -362,8 +396,14 @@ function renderGrid() {
     (pos.has(b.slug) ? pos.get(b.slug) : -1)
   );
 
+  // Belt & braces for the scroll-jump fix above: snapshot the window scroll
+  // and restore it in the same frame, so even a future layout read sneaking
+  // into the rebuild can't leave the viewport clamped to the top.
+  const scroller = document.scrollingElement || document.documentElement;
+  const scrollY = scroller.scrollTop;
   empty.hidden = filtered.length > 0;
   bucketCards(filtered.map((p) => buildCard(p)));
+  if (scroller.scrollTop !== scrollY) scroller.scrollTop = scrollY;
 }
 
 // ── Offset (masonry) layout ───────────────────────────────────────────────
@@ -670,6 +710,7 @@ const TASK_MARK_SVG = {
 };
 const TASK_SEND_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
 const TASK_TRASH_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></svg>';
+const TASK_CHEVRON_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 
 function agentLabel() { return taskAgent === "codex" ? "Codex" : "Claude Code"; }
 
@@ -874,15 +915,24 @@ function renderTasks(node, p) {
     else list.appendChild(dragging);
   });
 
-  // Expander — counts everything currently hidden (overflow open + done).
-  const hiddenCount = (open.length + done.length) - ordered.length;
-  if (expanded && tasks.length > 0) {
+  // Expander — counts everything the COLLAPSED view hides (overflow open +
+  // done). Styled as a pill toggle; the chevron flips via .expanded. When
+  // collapsing would hide nothing (e.g. the only completed task was just
+  // unchecked), expansion is meaningless — drop the state so "Show less"
+  // doesn't linger on a fully visible list.
+  const hiddenCount = Math.max(0, open.length - TASK_VISIBLE_MAX) + done.length;
+  if (hiddenCount === 0) expandedTaskCards.delete(p.slug);
+  if (expanded && hiddenCount > 0) {
     more.hidden = false;
-    more.textContent = "Show less";
+    more.classList.add("expanded");
+    more.innerHTML = `<span>Show less</span>${TASK_CHEVRON_SVG}`;
+    more.setAttribute("aria-expanded", "true");
     more.onclick = () => { expandedTaskCards.delete(p.slug); refreshCard(p.slug); };
   } else if (hiddenCount > 0) {
     more.hidden = false;
-    more.textContent = `+${hiddenCount} more…`;
+    more.classList.remove("expanded");
+    more.innerHTML = `<span>+${hiddenCount} more</span>${TASK_CHEVRON_SVG}`;
+    more.setAttribute("aria-expanded", "false");
     more.onclick = () => { expandedTaskCards.add(p.slug); refreshCard(p.slug); };
   } else {
     more.hidden = true;
@@ -990,16 +1040,87 @@ async function sendTasks(p, taskIds) {
 // there would steal focus / slam the menu shut.
 let taskPollTimer = null;
 function anyTasksInProgress() {
-  return projects.some((p) => (p.tasks || []).some((t) => t.status === "in-progress"));
+  // Also keep polling while any project has a live interactive Claude/Codex
+  // terminal open, so its session badge clears on the next tick once the user
+  // closes that window (the server prunes closed sessions on each fetch).
+  return projects.some(
+    (p) => (p.liveSessions || 0) > 0 || (p.tasks || []).some((t) => t.status === "in-progress")
+  );
 }
+// ── Active sessions ─────────────────────────────────────────────────────────
+// Each card carries its own "N Session(s)" badge (built in buildCard) showing
+// how many AI sends are still in progress for that project. Clicking the badge
+// asks the server to open the running background terminal(s) for THAT project so
+// the user can watch what's going on — "open up all the running terminals
+// corresponding to that session". Passing a project scopes the open to its own
+// session windows; omitting it falls back to the global open-everything action.
+async function openSessions(p) {
+  try {
+    const url = p && p.slug
+      ? `/api/projects/${p.slug}/sessions/open`
+      : `/api/sessions/open`;
+    const r = await api(url, { method: "POST" });
+    if (r && r.focused > 0) {
+      toast({
+        kind: "info",
+        title: r.focused === 1 ? "Opened session terminal" : `Opened ${r.focused} session terminals`,
+        // Headless sessions have no window of their own, so we open a live
+        // log-tailing terminal instead of raising an existing window. The
+        // fallback flag means the server couldn't pin down this project's
+        // exact window and raised every running session terminal instead.
+        sub: r.fallback
+          ? "Couldn't match this project's window by name, so every running session terminal was raised."
+          : r.headless
+          ? "Showing live output from the background session(s)."
+          : "Brought the running session window(s) to the front.",
+      });
+    } else if (r && r.headless) {
+      toast({
+        kind: "info",
+        title: "No live session output yet",
+        sub: "The background session may have just started or already finished — try again in a moment.",
+      });
+    } else {
+      toast({
+        kind: "info",
+        title: "No terminal windows found",
+        sub: "The session may have already finished or its window was closed.",
+      });
+    }
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't open terminals", sub: err.message });
+  }
+}
+// Timestamp of the user's last scroll gesture. The 8s poll repaint tears the
+// whole grid down; doing that mid-scroll kills the gesture's momentum and,
+// combined with any layout hiccup, reads as "the app forced me back up the
+// page". Wheel/touch are captured too because 'scroll' alone misses the very
+// start of a gesture. Passive + capture: never delays scrolling, and inner
+// scrollers (task lists) count as activity as well.
+let lastUserScrollAt = 0;
+["scroll", "wheel", "touchmove"].forEach((ev) =>
+  window.addEventListener(ev, () => { lastUserScrollAt = Date.now(); }, { passive: true, capture: true })
+);
+
 function taskPollTick() {
+  // Don't refetch + full-repaint the grid while the window is minimized or
+  // hidden — nobody is looking, and with many projects this is a needless
+  // (and event-loop-blocking) full teardown every 8s. The focus handler
+  // refreshes immediately when the user returns, so no staleness is visible.
+  if (document.hidden) return;
   if (document.querySelector(".modal.is-open")) return;
   if (document.querySelector('.card[data-menu="open"]')) return;
+  // Mid-scroll: skip this tick entirely — the next one (8s) will catch up.
+  if (Date.now() - lastUserScrollAt < 1500) return;
   const ae = document.activeElement;
   if (ae && (ae.classList.contains("task-add-input") || ae.id === "search")) return;
   loadProjects().catch(() => {});
 }
 function syncTaskPolling() {
+  // Common chokepoint for every task-state change (initial load, 8s poll,
+  // optimistic send, manual status flip, undo) — keep the background poll
+  // running while any session is live. Per-card session badges are rebuilt by
+  // buildCard whenever a card is (re)rendered, so they need no nudge here.
   const active = anyTasksInProgress();
   if (active && !taskPollTimer) {
     taskPollTimer = setInterval(taskPollTick, 8000);
@@ -1009,19 +1130,113 @@ function syncTaskPolling() {
   }
 }
 
+// ── Reference-link chip editor ─────────────────────────────────────────────
+// Shared by the task editor and the schedule form. Turns a [list, input, Add]
+// trio into a "paste a URL → Add → removable chip" control, mirroring how scan
+// paths are added in Settings. Pasting several URLs at once (newline/space
+// separated) adds each. Returns { set, get } so callers can load/read the
+// working list without touching the DOM.
+function makeLinkEditor({ listEl, inputEl, addBtn }) {
+  let links = [];
+  function render() {
+    listEl.textContent = "";
+    links.forEach((url, i) => {
+      const item = document.createElement("div");
+      item.className = "path-item";
+      item.innerHTML = `<span></span><button class="remove" type="button" aria-label="Remove">✕</button>`;
+      const txt = item.querySelector("span");
+      txt.textContent = url;
+      txt.title = url;
+      item.querySelector(".remove").addEventListener("click", () => {
+        links.splice(i, 1);
+        render();
+      });
+      listEl.appendChild(item);
+    });
+  }
+  function add(raw) {
+    const v = (raw || "").trim();
+    if (!v) return;
+    if (!links.includes(v)) links.push(v);
+    render();
+  }
+  function addMany(text) {
+    String(text || "").split(/[\s\r\n\t]+/).map((s) => s.trim()).filter(Boolean).forEach(add);
+  }
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      addMany(inputEl.value);
+      inputEl.value = "";
+      inputEl.focus();
+    });
+  }
+  if (inputEl) {
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); addMany(inputEl.value); inputEl.value = ""; }
+    });
+    // Pasting MULTIPLE urls at once (they contain whitespace/newlines) adds each
+    // as its own chip; a single url paste falls through so the user can tweak it
+    // before hitting Add.
+    inputEl.addEventListener("paste", (e) => {
+      const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+      if (/[\s\r\n\t]/.test(text.trim())) {
+        e.preventDefault();
+        addMany(text);
+        inputEl.value = "";
+      }
+    });
+  }
+  return {
+    set(arr) { links = Array.isArray(arr) ? arr.filter(Boolean).map(String) : []; if (inputEl) inputEl.value = ""; render(); },
+    get() { return [...links]; },
+  };
+}
+
 // ── Task editor modal ─────────────────────────────────────────────────────
 const taskModal      = document.getElementById("modal-task");
 const taskEditTitle  = document.getElementById("task-edit-title");
 const taskEditNote   = document.getElementById("task-edit-note");
+const taskLinksEditor = makeLinkEditor({
+  listEl:  document.getElementById("task-edit-links-list"),
+  inputEl: document.getElementById("task-edit-links-input"),
+  addBtn:  document.getElementById("task-edit-links-add"),
+});
 const taskEditReport = document.getElementById("task-edit-report");
 const taskEditDelete = document.getElementById("task-edit-delete");
 const taskEditSave   = document.getElementById("task-edit-save");
+const taskImageInput   = document.getElementById("task-edit-image-input");
+const taskImageAttach  = document.getElementById("task-image-attach");
+const taskImageEmpty   = document.getElementById("task-image-empty");
+const taskImagePreview = document.getElementById("task-image-preview");
+const taskImageThumb   = document.getElementById("task-image-thumb");
+const taskImageName    = document.getElementById("task-image-name");
+const taskImageRemove  = document.getElementById("task-image-remove");
 let editingTask = null;            // { slug, id }
+
+// Swap the image field between its "Attach image" empty state and the
+// thumbnail preview, reading whatever image the task currently carries. The
+// ?v= cache-buster forces a refetch after an upload replaces the file in place.
+function renderTaskImage(p, t) {
+  const img = t.image;
+  if (img && img.name) {
+    taskImageThumb.src = `/api/projects/${p.slug}/tasks/${t.id}/image?v=${encodeURIComponent(t.updatedAt || img.name)}`;
+    taskImageName.textContent = img.name;
+    taskImageEmpty.hidden = true;
+    taskImagePreview.hidden = false;
+  } else {
+    taskImageThumb.removeAttribute("src");
+    taskImageName.textContent = "";
+    taskImageEmpty.hidden = false;
+    taskImagePreview.hidden = true;
+  }
+}
 
 function openTaskModal(p, t, { focusNote = false } = {}) {
   editingTask = { slug: p.slug, id: t.id };
   taskEditTitle.value = t.title;
   taskEditNote.value = t.note || "";
+  taskLinksEditor.set(t.links);
+  renderTaskImage(p, t);
   // Surface the agent's last report so a "failed" has its reason attached.
   if (t.statusNote) {
     taskEditReport.hidden = false;
@@ -1037,6 +1252,81 @@ function openTaskModal(p, t, { focusNote = false } = {}) {
   // the prompt note instead so the natural next step is one keystroke away.
   (focusNote ? taskEditNote : taskEditTitle).focus();
 }
+
+// Upload a single image File to the currently-edited task and swap the preview
+// in. Shared by the file picker and the clipboard-paste path. A pasted image
+// usually arrives without a filename, so synthesise one from its mime type
+// (the server derives the on-disk extension from name/content-type either way).
+async function uploadTaskImageFile(file) {
+  if (!file || !editingTask) return;
+  const p = projects.find((x) => x.slug === editingTask.slug);
+  const t = p?.tasks?.find((x) => x.id === editingTask.id);
+  if (!p || !t) return;
+  let name = (file.name || "").trim();
+  if (!name) {
+    const sub = (file.type && file.type.split("/")[1]) || "png";
+    name = `pasted-image.${sub === "jpeg" ? "jpg" : sub}`;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    // Raw byte upload (no base64 inflation). The server route uses its own
+    // higher body limit, so this bypasses the 1 MB JSON cap on /api.
+    const res = await fetch(
+      `/api/projects/${p.slug}/tasks/${t.id}/image?name=${encodeURIComponent(name)}`,
+      { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: buf }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    Object.assign(t, data.task);
+    renderTaskImage(p, t);
+    refreshCard(p.slug);
+    toast({ kind: "success", title: "Image attached", sub: name });
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't attach image", sub: err.message });
+  }
+}
+
+// Attach → open the native file picker. The chosen image is uploaded straight
+// away (the task already exists in the editor) and the preview swaps in.
+taskImageAttach?.addEventListener("click", () => taskImageInput?.click());
+taskImageInput?.addEventListener("change", async () => {
+  const file = taskImageInput.files && taskImageInput.files[0];
+  taskImageInput.value = ""; // allow re-picking the same file later
+  await uploadTaskImageFile(file);
+});
+
+// Paste an image straight from the clipboard (Ctrl+V) anywhere inside the task
+// dialog — copy an image, open/Edit the task, paste, and it's attached as the
+// reference image. Pasting into the text fields still types normally; we only
+// intercept when the clipboard actually carries an image file.
+taskModal?.addEventListener("paste", async (e) => {
+  if (!editingTask) return;
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.kind === "file" && (it.type || "").startsWith("image/")) {
+      const file = it.getAsFile();
+      if (file) { e.preventDefault(); await uploadTaskImageFile(file); break; }
+    }
+  }
+});
+taskImageRemove?.addEventListener("click", async () => {
+  if (!editingTask) return;
+  const p = projects.find((x) => x.slug === editingTask.slug);
+  const t = p?.tasks?.find((x) => x.id === editingTask.id);
+  if (!p || !t) return;
+  try {
+    const r = await api(`/api/projects/${p.slug}/tasks/${t.id}/image/delete`, { method: "POST", body: {} });
+    Object.assign(t, r.task);
+    renderTaskImage(p, t);
+    refreshCard(p.slug);
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't remove image", sub: err.message });
+  }
+});
 function closeTaskModal() {
   taskModal.classList.remove("is-open");
   taskModal.style.display = "none";
@@ -1055,10 +1345,13 @@ taskEditSave?.addEventListener("click", async () => {
     toast({ kind: "error", title: "Task needs a title", sub: "Give it a short summary first." });
     return;
   }
+  // Links come from the chip editor (already trimmed + de-duped). The server
+  // validates/normalises.
+  const links = taskLinksEditor.get();
   try {
     const r = await api(`/api/projects/${p.slug}/tasks/${t.id}`, {
       method: "POST",
-      body: { title, note: taskEditNote.value },
+      body: { title, note: taskEditNote.value, links },
     });
     Object.assign(t, r.task);
     closeTaskModal();
@@ -1096,6 +1389,38 @@ function buildCard(p) {
     finishCardDrag();
   });
   node.querySelector(".card-title").textContent = p.name;
+
+  // Active-session badge. A "send" launches ONE background terminal that works
+  // this project's queued tasks, so a distinct session = a distinct (send)
+  // batch — keyed by sentAt — among this project's in-progress tasks. Clicking
+  // the card's Claude/Codex button opens an interactive terminal that's tracked
+  // separately (server-side liveSessions) and counts the same way: each open
+  // window is one live session. The badge sums both and, when clicked, raises
+  // every running terminal window. Hidden while the project has nothing running.
+  const sessionBadge = node.querySelector(".card-session-badge");
+  const sessionText  = node.querySelector(".card-session-text");
+  if (sessionBadge && sessionText) {
+    const batches = new Set();
+    for (const t of p.tasks || []) {
+      if (t.status === "in-progress") batches.add(t.sentAt || "");
+    }
+    const n = batches.size + (p.liveSessions || 0);
+    if (n === 0) {
+      sessionBadge.hidden = true;
+    } else {
+      sessionBadge.hidden = false;
+      sessionText.textContent = `${n} Session${n === 1 ? "" : "s"}`;
+      sessionBadge.setAttribute(
+        "aria-label",
+        `${n} active terminal session${n === 1 ? "" : "s"} — click to open`
+      );
+      sessionBadge.title = "Open this project's running terminal session windows";
+      sessionBadge.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openSessions(p);
+      });
+    }
+  }
 
   // Visit chip — only shown when the project has a github.com origin (set
   // server-side via .git/config detection). Inserted into card-title-row
@@ -1279,6 +1604,14 @@ async function openTool(slug, tool) {
     }
     const labels = { vscode: "VS Code", claude: "Claude Code", codex: "Codex", explorer: "File Explorer" };
     toast({ kind: "info", title: `Opening ${labels[tool] || tool}…`, sub: "Launching in a new window." });
+    // For an interactive Claude/Codex terminal the server registers the new
+    // window ~1.4s after launch; refetch shortly after so the card's session
+    // badge lights up without waiting for the next poll. loadProjects starts
+    // the poll loop (anyTasksInProgress now counts live sessions), which then
+    // clears the badge once the user closes the terminal.
+    if ((tool === "claude" || tool === "codex") && !(result && result.notInstalled)) {
+      setTimeout(() => { loadProjects().catch(() => {}); }, 2000);
+    }
   } catch (err) {
     toast({ kind: "error", title: "Couldn't open", sub: err.message });
   }
@@ -1612,7 +1945,6 @@ document.addEventListener("keydown", (e) => {
     // Modal helpers below are declared later in the file; they exist by the
     // time a user could ever fire this handler (after first paint).
     if (typeof closeInstallModal === "function") closeInstallModal();
-    if (typeof closeReleaseModal === "function") closeReleaseModal();
     if (typeof closeBackupModal === "function")  closeBackupModal();
     closeAllCardMenus();
   }
@@ -1902,7 +2234,7 @@ function refreshAiSummary() {
   // exactly what their CLI is about to do.
   let action;
   if (wizardMode === "release") {
-    action = `re-publish "${repo}" and create a new release (${cliName} will pick the version)`;
+    action = `update "${repo}" and cut a new release — version picked by ${cliName}, detailed changelog of everything that changed, and the built release package attached`;
   } else if (wizardMode === "overwrite") {
     action = `overwrite "${repo}" on GitHub with the latest code in this folder (no new release tag)`;
   } else {
@@ -2143,56 +2475,6 @@ async function runPublish() {
   }
 }
 
-// ── Publish New Release modal ─────────────────────────────────────────────
-let relProject = null;
-
-function openReleaseModal(project) {
-  relProject = project;
-  relTarget.textContent = `Repo: ${project.githubUrl}`;
-  relTag.value   = "";
-  relTitle.value = "";
-  relAuto.checked = true;
-  relNotesWrap.hidden = true;
-  relNotes.value = "";
-  relError.textContent = "";
-  relSubmit.disabled = false;
-  relModal.style.display = "";
-  relModal.classList.add("is-open");
-}
-function closeReleaseModal() {
-  relModal.classList.remove("is-open");
-  relModal.style.display = "none";
-  relProject = null;
-}
-relModal.querySelectorAll(".modal-close, .modal-backdrop").forEach((el) =>
-  el.addEventListener("click", closeReleaseModal)
-);
-relAuto.addEventListener("change", () => { relNotesWrap.hidden = relAuto.checked; });
-
-relSubmit.addEventListener("click", async () => {
-  if (!relProject) return;
-  const tag = relTag.value.trim();
-  if (!tag) { relError.textContent = "Tag is required (e.g., v1.0.1)."; return; }
-  relSubmit.disabled = true;
-  relError.textContent = "";
-  try {
-    const r = await api(`/api/projects/${relProject.slug}/github/release`, {
-      method: "POST",
-      body: {
-        tag,
-        title: relTitle.value.trim() || undefined,
-        autoNotes: relAuto.checked,
-        notes: relAuto.checked ? undefined : relNotes.value,
-      },
-    });
-    toast({ kind: "success", title: `Released ${tag}`, sub: r.releaseUrl || relProject.githubUrl });
-    closeReleaseModal();
-  } catch (err) {
-    relError.textContent = err.message;
-    relSubmit.disabled = false;
-  }
-});
-
 // ── In-card menu (3-dot transforms the card body) ─────────────────────────
 // Clicking the 3-dot button on a card hides the body sections and reveals
 // the .card-menu-view container populated with the same menu items that
@@ -2305,9 +2587,15 @@ async function dispatchCardMenuAction(action, project, card) {
 }
 
 // ── Search + auto-rescan ──────────────────────────────────────────────────
+// renderGrid() filters + sorts every project and rebuilds the grid; doing that
+// synchronously on every keystroke janks once there are many projects. Update
+// `query` immediately (never lose input) but debounce the rebuild so a burst of
+// fast typing collapses into a single render.
+let searchDebounce = null;
 searchEl.addEventListener("input", (e) => {
   query = e.target.value;
-  renderGrid();
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(renderGrid, 120);
 });
 
 // Auto-refresh when the window regains focus (e.g., after dropping in a new project).
@@ -2370,6 +2658,9 @@ function openSettings() {
       openClaudeInDesktop: cfg.openClaudeInDesktop === true,
       // Same opt-in for Codex (uses `codex app <folder>` instead of a deep link).
       openCodexInDesktop: cfg.openCodexInDesktop === true,
+      // Off by default — when on, task/publish sessions run hidden and close
+      // themselves once the work is done (no lingering terminal windows).
+      headlessTerminals: cfg.headlessTerminals === true,
       // Which AI CLI the task send buttons launch. Claude unless opted out.
       taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
     };
@@ -2410,6 +2701,11 @@ document.getElementById("set-claude-desktop")?.addEventListener("change", (e) =>
 // Codex desktop-app toggle — routes the Codex button to `codex app <folder>`.
 document.getElementById("set-codex-desktop")?.addEventListener("change", (e) => {
   if (settingsState) settingsState.openCodexInDesktop = e.target.checked;
+});
+// Headless background terminals — task/publish sessions run hidden and exit
+// when done (handled server-side in spawnAiPrompt's headless branch).
+document.getElementById("set-headless-terminals")?.addEventListener("change", (e) => {
+  if (settingsState) settingsState.headlessTerminals = e.target.checked;
 });
 // Task agent segment — which CLI the per-task send buttons launch. Same
 // slide-segment pattern as the publish modal's visibility control.
@@ -2454,16 +2750,68 @@ function renderSettings() {
   if (claudeDesktopEl) claudeDesktopEl.checked = !!settingsState.openClaudeInDesktop;
   const codexDesktopEl = document.getElementById("set-codex-desktop");
   if (codexDesktopEl) codexDesktopEl.checked = !!settingsState.openCodexInDesktop;
+  // Headless background terminals toggle
+  const headlessEl = document.getElementById("set-headless-terminals");
+  if (headlessEl) headlessEl.checked = !!settingsState.headlessTerminals;
   // Task agent segment
   setTaskAgentSegment(settingsState.taskAgent);
 
   // Logo preview — bust cache so a freshly uploaded file shows.
   document.getElementById("set-logo-preview").src = "/api/logo?t=" + Date.now();
 
-  // (Status / KPI color customisation removed — defaults only. Server
-  // still honours any prior `statusOverrides`/`totalColor` values stored
-  // in user-config.json so existing customisations keep working; "Reset
-  // all to defaults" wipes them.)
+  // Statuses
+  const stHost = document.getElementById("set-status-list");
+  stHost.innerHTML = "";
+  settingsState.statuses.forEach((s, i) => {
+    const row = document.createElement("div");
+    row.className = "status-edit-row";
+
+    const swatch = document.createElement("span");
+    swatch.className = "status-swatch";
+    swatch.style.background = statusSwatchColor(s.color);
+
+    const label = document.createElement("input");
+    label.type = "text";
+    label.value = s.label;
+    label.setAttribute("aria-label", "Status name");
+    // Mutate in place without re-rendering — a re-render here would yank focus
+    // out of the field on every keystroke.
+    label.addEventListener("input", () => {
+      settingsState.statuses[i].label = label.value;
+    });
+
+    const sel = document.createElement("select");
+    sel.setAttribute("aria-label", "Status color");
+    // A legacy hex from the old customisation screen has no matching token.
+    // Offer it as its own option so merely opening Settings doesn't silently
+    // convert someone's existing color to a token.
+    const opts = isHex(s.color) ? [s.color, ...STATUS_COLOR_TOKENS] : STATUS_COLOR_TOKENS;
+    for (const t of opts) {
+      const o = document.createElement("option");
+      o.value = t;
+      o.textContent = t;
+      if (t === s.color) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => {
+      settingsState.statuses[i].color = sel.value;
+      renderSettings();   // repaint the swatch
+    });
+
+    const del = document.createElement("button");
+    del.className = "remove";
+    del.type = "button";
+    del.textContent = "✕";
+    del.setAttribute("aria-label", `Remove ${s.label}`);
+    del.disabled = settingsState.statuses.length <= 1;
+    del.addEventListener("click", () => {
+      settingsState.statuses.splice(i, 1);
+      renderSettings();
+    });
+
+    row.append(swatch, label, sel, del);
+    stHost.appendChild(row);
+  });
 
   // Scan paths
   const scanHost = document.getElementById("set-scan-paths");
@@ -2662,31 +3010,62 @@ document.getElementById("set-exclude-add").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); document.getElementById("set-exclude-confirm").click(); }
 });
 
+// Add a status. New ones start "muted" — a neutral chip the user can then
+// recolor, rather than guessing a meaning from the palette.
+document.getElementById("set-status-confirm").addEventListener("click", () => {
+  const input = document.getElementById("set-status-add");
+  const label = input.value.trim();
+  if (!label) { settingsError("Give the status a name first."); return; }
+  const taken = new Set(settingsState.statuses.map((s) => s.id));
+  settingsState.statuses.push({ id: makeStatusId(label, taken), label, color: "muted" });
+  input.value = "";
+  settingsError("");
+  renderSettings();
+});
+document.getElementById("set-status-add").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("set-status-confirm").click(); }
+});
+
 // Save: build the user-config patch from the working copy.
 document.getElementById("set-save").addEventListener("click", async () => {
   const enabledStackBadge =
     settingsState.showStackBadge && !settingsState._initialShowStackBadge;
+  // Trim status labels before validating — a name of just spaces would pass a
+  // truthy check but render as a blank chip.
+  const statuses = settingsState.statuses.map((s) => ({ ...s, label: s.label.trim() }));
+  if (statuses.some((s) => !s.label)) {
+    settingsError("Every status needs a name.");
+    return;
+  }
   const patch = {
     backupPath: settingsState.backupPath || undefined,
     scanPaths: settingsState.scanPaths,
     excludeFolders: settingsState.excludeFolders,
+    statuses,
     showStackBadge: !!settingsState.showStackBadge,
     showLanguageBadges: !!settingsState.showLanguageBadges,
     openClaudeInDesktop: !!settingsState.openClaudeInDesktop,
     openCodexInDesktop: !!settingsState.openCodexInDesktop,
+    headlessTerminals: !!settingsState.headlessTerminals,
     taskAgent: settingsState.taskAgent === "codex" ? "codex" : "claude",
   };
   try {
-    await api("/api/config", { method: "POST", body: patch });
+    const saved = await api("/api/config", { method: "POST", body: patch });
     closeSettings();
     await loadProjects();
+    // Removing a status rehomes any project still filed under it. Say so out
+    // loud — projects silently changing status is exactly the kind of thing a
+    // user should be told, not left to discover.
+    const moved = saved?.movedProjects || 0;
     toast({
       kind: "success",
       title: "Settings saved",
       // When the stack-badge toggle flipped on, the badges came from a fresh
       // detection pass; otherwise just confirm the save. Always a one-line sub
       // so every toast reads consistently.
-      sub: enabledStackBadge ? "Badges rescanned." : "Your preferences are updated.",
+      sub: moved
+        ? `${moved} project${moved === 1 ? "" : "s"} moved to “${saved.statuses[0].label}”.`
+        : enabledStackBadge ? "Badges rescanned." : "Your preferences are updated.",
     });
   } catch (err) { settingsError(err.message); }
 });
@@ -2702,6 +3081,444 @@ document.getElementById("set-reset").addEventListener("click", async () => {
     toast({ kind: "info", title: "Settings reset", sub: "Back to bundled defaults." });
   } catch (err) { settingsError(err.message); }
 });
+
+// ── Scheduled tasks modal ─────────────────────────────────────────────────
+const scheduleModal   = document.getElementById("modal-schedule");
+const btnSchedule     = document.getElementById("btn-schedule");
+const schedListEl     = document.getElementById("schedule-list");
+const schedEmptyEl    = document.getElementById("schedule-empty");
+const schedProjectSel  = document.getElementById("sched-project");
+const schedProjectsList = document.getElementById("sched-projects-list");
+const schedProjectAdd  = document.getElementById("sched-project-add");
+const schedTitleEl    = document.getElementById("sched-title");
+const schedNoteEl     = document.getElementById("sched-note");
+const schedLinksEditor = makeLinkEditor({
+  listEl:  document.getElementById("sched-links-list"),
+  inputEl: document.getElementById("sched-links-input"),
+  addBtn:  document.getElementById("sched-links-add"),
+});
+const schedRecurrence = document.getElementById("sched-recurrence");
+const schedTimeEl     = document.getElementById("sched-time");
+const schedDateTimeEl = document.getElementById("sched-datetime");
+const schedWeekdayEl  = document.getElementById("sched-weekday");
+const schedDayEl      = document.getElementById("sched-day");
+const schedAgentEl    = document.getElementById("sched-agent");
+const schedNextHint   = document.getElementById("sched-next-hint");
+const schedErrorEl    = document.getElementById("sched-error");
+const schedFormTitle  = document.getElementById("sched-form-title");
+const schedSaveBtn    = document.getElementById("sched-save");
+const schedCancelEdit = document.getElementById("sched-cancel-edit");
+const schedNewBtn     = document.getElementById("sched-new");
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+let schedules = [];          // last fetched list
+let editingScheduleId = null; // null = create mode
+// Projects the schedule being built/edited targets (multi-select). Chips
+// mirror the reference-link editor right below the field — same component.
+let schedSelectedSlugs = [];
+// Labels for slugs whose project is no longer in the dashboard list (folder
+// moved/deleted) — seeded from the schedule payload's resolved names on edit.
+const schedChipNames = new Map();
+
+function schedProjectName(slug) {
+  const p = projects.find((x) => x.slug === slug);
+  return p ? p.name : (schedChipNames.get(slug) || "(missing project)");
+}
+function renderSchedProjectChips() {
+  schedProjectsList.textContent = "";
+  schedSelectedSlugs.forEach((slug, i) => {
+    const item = document.createElement("div");
+    item.className = "path-item";
+    // Static, trusted markup — the project name goes in via textContent below.
+    item.innerHTML = `<span></span><button class="remove" type="button" aria-label="Remove">✕</button>`;
+    const txt = item.querySelector("span");
+    txt.textContent = schedProjectName(slug);
+    txt.title = schedProjectName(slug);
+    item.querySelector(".remove").addEventListener("click", () => {
+      schedSelectedSlugs.splice(i, 1);
+      renderSchedProjectChips();
+    });
+    schedProjectsList.appendChild(item);
+  });
+}
+function addSchedProject() {
+  const slug = schedProjectSel.value;
+  if (!slug) return;
+  if (!schedSelectedSlugs.includes(slug)) {
+    schedSelectedSlugs.push(slug);
+    renderSchedProjectChips();
+  }
+  schedErrorEl.textContent = "";
+}
+
+// Fill the day-of-month select once (1–31). The picker clamps to the real
+// month length server-side, so "31" simply means "last day" in shorter months.
+function populateScheduleDayOptions() {
+  if (!schedDayEl || schedDayEl.options.length) return;
+  for (let d = 1; d <= 31; d++) {
+    const o = document.createElement("option");
+    o.value = String(d);
+    o.textContent = ordinal(d);
+    schedDayEl.appendChild(o);
+  }
+}
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+function fmtClockFromHHMM(time) {
+  const [hh, mm] = String(time || "09:00").split(":").map(Number);
+  const d = new Date();
+  d.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+function fmtDateTime(iso) {
+  const t = Date.parse(iso || "");
+  if (!Number.isFinite(t)) return "";
+  return new Date(t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+// Human cadence summary for a schedule-shaped object (form values or a saved row).
+function scheduleSummary(s) {
+  if (s.recurrence === "once") {
+    const when = fmtDateTime(s.startAt);
+    return when ? `Once on ${when}` : "Once (pick a date)";
+  }
+  if (s.recurrence === "weekly") return `Weekly on ${WEEKDAY_NAMES[Number(s.weekday)] || "Monday"} at ${fmtClockFromHHMM(s.time)}`;
+  if (s.recurrence === "monthly") return `Monthly on the ${ordinal(Number(s.day) || 1)} at ${fmtClockFromHHMM(s.time)}`;
+  return `Daily at ${fmtClockFromHHMM(s.time)}`;
+}
+
+// Show only the timing fields relevant to the chosen cadence.
+function applyRecurrenceVisibility() {
+  const r = schedRecurrence.value;
+  document.getElementById("sched-field-datetime").hidden = r !== "once";
+  document.getElementById("sched-field-time").hidden     = r === "once";
+  document.getElementById("sched-field-weekday").hidden  = r !== "weekly";
+  document.getElementById("sched-field-day").hidden      = r !== "monthly";
+  refreshScheduleHint();
+}
+function refreshScheduleHint() {
+  schedNextHint.textContent = "Runs: " + scheduleSummary(readScheduleForm());
+}
+
+// Populate the project <select> from the already-loaded projects list. If the
+// schedule being edited points at a project no longer present, keep it visible
+// as a flagged option so the selection isn't silently lost.
+function renderScheduleProjectSelect(selectedSlug) {
+  schedProjectSel.textContent = "";
+  const have = new Set();
+  const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
+  for (const p of sorted) {
+    const o = document.createElement("option");
+    o.value = p.slug;
+    o.textContent = p.name;
+    schedProjectSel.appendChild(o);
+    have.add(p.slug);
+  }
+  if (selectedSlug && have.has(selectedSlug)) schedProjectSel.value = selectedSlug;
+}
+
+function resetScheduleForm() {
+  editingScheduleId = null;
+  schedFormTitle.textContent = "New scheduled task";
+  schedCancelEdit.hidden = true;
+  schedSaveBtn.textContent = "Add schedule";
+  renderScheduleProjectSelect(projects[0]?.slug || "");
+  schedSelectedSlugs = [];
+  schedChipNames.clear();
+  renderSchedProjectChips();
+  schedTitleEl.value = "";
+  schedNoteEl.value = "";
+  schedLinksEditor.set([]);
+  schedRecurrence.value = "daily";
+  schedTimeEl.value = "09:00";
+  schedWeekdayEl.value = "1";
+  schedDayEl.value = "1";
+  schedAgentEl.value = "";
+  // Default the one-off picker to ~an hour out, rounded, for a sensible start.
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setMinutes(0, 0, 0);
+  schedDateTimeEl.value = toLocalDateTimeValue(d);
+  schedErrorEl.textContent = "";
+  applyRecurrenceVisibility();
+}
+// Date → "YYYY-MM-DDTHH:MM" in local time (what <input type=datetime-local> wants).
+function toLocalDateTimeValue(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fillScheduleForm(s) {
+  editingScheduleId = s.id;
+  schedFormTitle.textContent = "Edit scheduled task";
+  schedCancelEdit.hidden = false;
+  schedSaveBtn.textContent = "Save changes";
+  renderScheduleProjectSelect(s.slug);
+  // Seed the chip list from the saved schedule. projectNames (resolved
+  // server-side) label any slug whose folder is no longer in the dashboard.
+  schedSelectedSlugs = (Array.isArray(s.slugs) && s.slugs.length ? s.slugs : [s.slug]).filter(Boolean);
+  schedChipNames.clear();
+  (s.projectNames || []).forEach((nm, i) => {
+    if (schedSelectedSlugs[i]) schedChipNames.set(schedSelectedSlugs[i], nm);
+  });
+  renderSchedProjectChips();
+  schedTitleEl.value = s.title || "";
+  schedNoteEl.value = s.note || "";
+  schedLinksEditor.set(s.links);
+  schedRecurrence.value = SCHED_RECURRENCES.has(s.recurrence) ? s.recurrence : "daily";
+  schedTimeEl.value = s.time || "09:00";
+  schedWeekdayEl.value = String(s.weekday ?? 1);
+  schedDayEl.value = String(s.day ?? 1);
+  schedAgentEl.value = s.agent === "claude" || s.agent === "codex" ? s.agent : "";
+  schedDateTimeEl.value = s.startAt && Date.parse(s.startAt)
+    ? toLocalDateTimeValue(new Date(s.startAt))
+    : toLocalDateTimeValue(new Date(Date.now() + 60 * 60 * 1000));
+  schedErrorEl.textContent = "";
+  applyRecurrenceVisibility();
+  // The editor lives below the list inside the scrollable body — bring it on
+  // screen so clicking a row's Edit visibly does something.
+  document.getElementById("schedule-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+const SCHED_RECURRENCES = new Set(["once", "daily", "weekly", "monthly"]);
+
+// Gather the form into the API body shape. The one-off datetime-local value is
+// passed through verbatim as startAt — the server parses it in local time.
+function readScheduleForm() {
+  return {
+    slugs: [...schedSelectedSlugs],
+    title: schedTitleEl.value.trim(),
+    note: schedNoteEl.value,
+    links: schedLinksEditor.get(),
+    recurrence: schedRecurrence.value,
+    time: schedTimeEl.value || "09:00",
+    weekday: Number(schedWeekdayEl.value),
+    day: Number(schedDayEl.value),
+    startAt: schedDateTimeEl.value || "",
+    agent: schedAgentEl.value || null,
+  };
+}
+
+function renderScheduleList() {
+  schedListEl.textContent = "";
+  schedEmptyEl.hidden = schedules.length > 0;
+  const countEl = document.getElementById("sched-count");
+  if (countEl) {
+    countEl.hidden = schedules.length === 0;
+    countEl.textContent = schedules.length;
+  }
+  for (const s of schedules) {
+    const row = document.createElement("div");
+    row.className = "schedule-row";
+    row.dataset.id = s.id;
+    if (!s.enabled) row.dataset.disabled = "true";
+
+    // At-a-glance state: green = armed, gray = paused, red = last run failed.
+    const dot = document.createElement("span");
+    dot.className = "schedule-row-dot";
+    dot.dataset.state = !s.enabled ? "paused" : (s.lastStatus === "error" ? "error" : "on");
+    row.appendChild(dot);
+
+    const main = document.createElement("div");
+    main.className = "schedule-row-main";
+
+    const titleLine = document.createElement("div");
+    titleLine.className = "schedule-row-title";
+    titleLine.textContent = s.title || "(untitled task)";
+    if (!s.projectExists) {
+      const warn = document.createElement("span");
+      warn.className = "schedule-row-warn";
+      warn.textContent = "folder missing";
+      titleLine.appendChild(warn);
+    }
+    main.appendChild(titleLine);
+
+    const meta = document.createElement("div");
+    meta.className = "schedule-row-meta";
+    const parts = [s.projectName || "—", scheduleSummary(s)];
+    if (s.agent) parts.push(s.agent === "codex" ? "Codex" : "Claude");
+    meta.textContent = parts.join("  •  ");
+    main.appendChild(meta);
+
+    const sub = document.createElement("div");
+    sub.className = "schedule-row-sub";
+    if (!s.enabled) {
+      sub.textContent = s.recurrence === "once" && s.lastRunAt ? `Ran ${fmtDateTime(s.lastRunAt)}` : "Paused";
+    } else if (s.nextRunAt) {
+      sub.textContent = "Next run " + fmtDateTime(s.nextRunAt);
+    } else {
+      sub.textContent = "No upcoming run";
+    }
+    if (s.lastStatus === "error" && s.lastError) {
+      const err = document.createElement("span");
+      err.className = "schedule-row-error";
+      err.textContent = "  •  last run failed: " + s.lastError;
+      sub.appendChild(err);
+    }
+    main.appendChild(sub);
+
+    const actions = document.createElement("div");
+    actions.className = "schedule-row-actions";
+
+    // Enable/disable switch (reuses the settings switch styling).
+    const toggle = document.createElement("label");
+    toggle.className = "switch";
+    toggle.title = s.enabled ? "Pause" : "Resume";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!s.enabled;
+    cb.setAttribute("aria-label", "Enabled");
+    cb.addEventListener("change", () => toggleSchedule(s, cb.checked));
+    const track = document.createElement("span");
+    track.className = "switch-track";
+    track.setAttribute("aria-hidden", "true");
+    track.innerHTML = '<span class="switch-thumb"></span>';
+    toggle.appendChild(cb);
+    toggle.appendChild(track);
+    actions.appendChild(toggle);
+
+    actions.appendChild(makeSchedActionBtn("Run now", () => runScheduleNow(s), SCHED_ICON.run));
+    actions.appendChild(makeSchedActionBtn("Edit", () => fillScheduleForm(s), SCHED_ICON.edit));
+    const del = makeSchedActionBtn("Delete", () => deleteSchedule(s), SCHED_ICON.del);
+    del.classList.add("schedule-row-del");
+    actions.appendChild(del);
+
+    row.appendChild(main);
+    row.appendChild(actions);
+    schedListEl.appendChild(row);
+  }
+}
+// Inline icons for the schedule-row actions, so they share the icon+label
+// language used across the rest of the app (card menu, send buttons, etc.).
+const SCHED_ICON = {
+  run:  '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 14 9-14 9z"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  del:  '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
+};
+function makeSchedActionBtn(label, onClick, icon) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn btn-ghost btn-sm";
+  if (icon) {
+    b.innerHTML = icon; // static, trusted markup
+    const span = document.createElement("span");
+    span.textContent = label;
+    b.appendChild(span);
+  } else {
+    b.textContent = label;
+  }
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+async function loadSchedules() {
+  try {
+    const data = await api("/api/schedules");
+    schedules = Array.isArray(data.schedules) ? data.schedules : [];
+    renderScheduleList();
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't load schedules", sub: err.message });
+  }
+}
+
+function openScheduleModal() {
+  populateScheduleDayOptions();
+  resetScheduleForm();
+  // Show the device timezone in the Important note so "local time" is concrete.
+  const tzEl = document.getElementById("sched-tz");
+  if (tzEl) {
+    try { tzEl.textContent = ` (${Intl.DateTimeFormat().resolvedOptions().timeZone})`; }
+    catch { tzEl.textContent = ""; }
+  }
+  scheduleModal.style.display = "";
+  scheduleModal.classList.add("is-open");
+  loadSchedules();
+}
+function closeScheduleModal() {
+  scheduleModal.classList.remove("is-open");
+  scheduleModal.style.display = "none";
+  editingScheduleId = null;
+}
+
+async function saveSchedule() {
+  const body = readScheduleForm();
+  if (!body.slugs.length) { schedErrorEl.textContent = "Add at least one project (pick one and press Add)."; return; }
+  if (!body.title) { schedErrorEl.textContent = "Give the task a name."; return; }
+  if (body.recurrence === "once" && !body.startAt) {
+    schedErrorEl.textContent = "Pick a date and time."; return;
+  }
+  schedErrorEl.textContent = "";
+  schedSaveBtn.disabled = true;
+  try {
+    const wasEditing = !!editingScheduleId;
+    const path = wasEditing ? `/api/schedules/${editingScheduleId}` : "/api/schedules";
+    await api(path, { method: "POST", body });
+    resetScheduleForm();
+    await loadSchedules();
+    // Back to the top of the scrollable body so the saved row is in view.
+    const body = scheduleModal.querySelector(".schedule-body");
+    if (body) body.scrollTo({ top: 0, behavior: "smooth" });
+    toast({ kind: "success", title: wasEditing ? "Schedule updated" : "Schedule created" });
+  } catch (err) {
+    schedErrorEl.textContent = err.message;
+  } finally {
+    schedSaveBtn.disabled = false;
+  }
+}
+
+async function toggleSchedule(s, enabled) {
+  try {
+    await api(`/api/schedules/${s.id}`, { method: "POST", body: { enabled } });
+    await loadSchedules();
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't update schedule", sub: err.message });
+    await loadSchedules();
+  }
+}
+
+async function runScheduleNow(s) {
+  try {
+    await api(`/api/schedules/${s.id}/run`, { method: "POST", body: {} });
+    toast({ kind: "success", title: "Scheduled task sent", sub: s.title });
+    await loadSchedules();
+    // Surface the freshly-created task on the project card behind the modal.
+    loadProjects().catch(() => {});
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't run task", sub: err.message });
+  }
+}
+
+async function deleteSchedule(s) {
+  if (!confirm(`Delete the scheduled task "${s.title}"?`)) return;
+  try {
+    await api(`/api/schedules/${s.id}/delete`, { method: "POST", body: {} });
+    if (editingScheduleId === s.id) resetScheduleForm();
+    await loadSchedules();
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't delete schedule", sub: err.message });
+  }
+}
+
+btnSchedule?.addEventListener("click", openScheduleModal);
+scheduleModal?.querySelectorAll(".modal-close, .modal-backdrop").forEach((el) =>
+  el.addEventListener("click", closeScheduleModal)
+);
+schedNewBtn?.addEventListener("click", () => {
+  resetScheduleForm();
+  document.getElementById("schedule-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+schedCancelEdit?.addEventListener("click", resetScheduleForm);
+schedProjectAdd?.addEventListener("click", addSchedProject);
+schedSaveBtn?.addEventListener("click", saveSchedule);
+schedRecurrence?.addEventListener("change", applyRecurrenceVisibility);
+[schedTimeEl, schedWeekdayEl, schedDayEl, schedDateTimeEl].forEach((el) =>
+  el?.addEventListener("change", refreshScheduleHint)
+);
+
+// Heartbeat: while no task is mid-flight the 8s task poll stays off (it's only
+// for live sessions), so a schedule that fires on its own would otherwise not
+// appear until the next focus/interaction. This slow 45s tick — same guards as
+// taskPollTick (skips when hidden / a modal is open / typing) — surfaces fired
+// scheduled tasks (and the lazy staleness sweep) within a reasonable window.
+setInterval(taskPollTick, 45000);
 
 // ── Traffic-light window controls ─────────────────────────────────────────
 const winApi = window.cdAPI?.window;

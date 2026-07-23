@@ -1,8 +1,8 @@
-// Electron main process — wraps Project Tracker in a native Windows window.
+// Electron main process — wraps Coding Drives in a native Windows window.
 // The Express server is loaded in-process via dynamic ESM import so there's
 // no child process to manage and no startup timing race.
 
-const { app, BrowserWindow, shell, Menu, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, Menu, Tray, dialog, ipcMain } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const url = require("node:url");
@@ -12,6 +12,14 @@ const CONFIG_PATH = path.join(ROOT, "config.json");
 
 // Use a stable productName so userData lands under "Coding Drives".
 app.setName("Coding Drives");
+
+// Single instance — launching the exe again while the app sits in the tray
+// must surface the existing window, not boot a second copy that dies on the
+// already-bound server port. The second-instance handler lives further down
+// (needs mainWindow in scope).
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+}
 
 // Marker for server.js so it knows it's running inside the Electron main process
 // (and can therefore use the native dialog).
@@ -56,13 +64,57 @@ function log(...args) {
 process.on("uncaughtException",  (err) => log("uncaughtException:",  err && err.stack ? err.stack : String(err)));
 process.on("unhandledRejection", (err) => log("unhandledRejection:", err && err.stack ? err.stack : String(err)));
 
+// Mirrors server.js loadConfig() precedence: user-config.json (userData —
+// survives updates) wins over config.json (install dir — replaced on update).
+// Read straight from disk rather than reusing server.js: this runs before the
+// server is imported, and only one key is needed. Keep the two in sync — if
+// they disagree, the window loads a different port than the server listens on.
 function loadPort() {
-  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")).port || 5179; }
-  catch { return 5179; }
+  const read = (p) => {
+    try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return {}; }
+  };
+  const bundled = read(CONFIG_PATH);
+  const user = read(path.join(process.env.PT_DATA_DIR, "user-config.json"));
+  return user.port || bundled.port || 5179;
 }
 const PORT = loadPort();
 
 let mainWindow = null;
+let tray = null;
+// Set by before-quit (tray "Quit", installer, OS shutdown). Distinguishes a
+// real quit from the user clicking the window's ✕ — which only HIDES the app
+// so the scheduler (30s ticker in server.js) keeps firing scheduled tasks.
+let quittingForReal = false;
+// The tray balloon is shown once per app run, the first time the window is
+// closed to the background — enough to teach the behaviour without nagging.
+let hideBalloonShown = false;
+
+// Bring the (possibly hidden or minimized) window back to the foreground.
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+}
+
+// System-tray icon — the app's home while it runs in the background. Created
+// once at startup (not on first hide) so the user can always see the app is
+// alive, and can reopen or fully quit it from here.
+function createTray(iconPath) {
+  try {
+    tray = new Tray(iconPath);
+    tray.setToolTip("Coding Drives — running in the background; scheduled tasks fire on time");
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: "Open Coding Drives", click: () => showMainWindow() },
+      { type: "separator" },
+      { label: "Quit (stops scheduled tasks)", click: () => { quittingForReal = true; app.quit(); } },
+    ]));
+    tray.on("click", () => showMainWindow());
+    tray.on("double-click", () => showMainWindow());
+  } catch (err) {
+    log("[tray] failed to create:", err?.message || err);
+  }
+}
 
 async function startServerInProcess() {
   // server.js is ESM and now awaits app.listen() at top-level.
@@ -124,14 +176,36 @@ function createWindow() {
   });
 
   // Open external links in the user's default browser, never in-window.
+  // http(s) only: anything else (file:, smb:, custom app schemes) handed to
+  // the OS from renderer-controlled markup is an unnecessary risk.
   mainWindow.webContents.setWindowOpenHandler(({ url: u }) => {
-    shell.openExternal(u);
+    if (/^https?:\/\//i.test(u)) shell.openExternal(u);
     return { action: "deny" };
   });
 
   // Notify renderer when maximize state flips so the green-button icon swaps.
   mainWindow.on("maximize",   () => mainWindow.webContents.send("window:maximize-changed", true));
   mainWindow.on("unmaximize", () => mainWindow.webContents.send("window:maximize-changed", false));
+
+  // Closing the window does NOT quit the app — it hides to the system tray so
+  // the in-process server (and its 30s schedule ticker) keeps running and
+  // scheduled tasks still fire on time. A real quit comes from the tray menu,
+  // the installer, or OS shutdown (all of which raise before-quit first).
+  mainWindow.on("close", (e) => {
+    if (quittingForReal) return;
+    e.preventDefault();
+    mainWindow.hide();
+    if (tray && !hideBalloonShown) {
+      hideBalloonShown = true;
+      try {
+        tray.displayBalloon({
+          title: "Coding Drives is still running",
+          content: "Scheduled tasks will fire on time. Reopen or quit from this tray icon.",
+          iconType: "info",
+        });
+      } catch {}
+    }
+  });
 
   // Expose the window so the in-process server can pop native dialogs.
   global.__codingDrivesWindow = mainWindow;
@@ -230,6 +304,10 @@ ipcMain.on("app:relaunch", () => {
   app.exit(0);
 });
 
+// Second launch of the exe (desktop shortcut, start menu) while we're already
+// running — likely someone looking for the backgrounded window. Surface it.
+app.on("second-instance", () => showMainWindow());
+
 app.whenReady().then(async () => {
   log("[main] app ready, ROOT =", ROOT, "USER_DATA =", USER_DATA);
   try {
@@ -237,18 +315,25 @@ app.whenReady().then(async () => {
     log(`[main] server up on ${PORT}`);
   } catch (err) {
     log("[main] server failed to start:", err && err.stack ? err.stack : String(err));
-    dialog.showErrorBox("Project Tracker — startup failed",
+    dialog.showErrorBox("Coding Drives — startup failed",
       `${err.message}\n\nCheck log at:\n${LOG_PATH}`);
     app.quit();
     return;
   }
   createWindow();
+  createTray(resolveWindowIconPath(USER_DATA));
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
+// Raised by tray Quit, app.quit(), the installer's close, or OS shutdown —
+// flip the flag so the window's close handler stops intercepting.
+app.on("before-quit", () => { quittingForReal = true; });
+
 app.on("window-all-closed", () => {
+  // Only reachable on a real quit: the window's close handler hides instead
+  // of closing in every other case.
   if (process.platform !== "darwin") app.quit();
 });
