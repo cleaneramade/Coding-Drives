@@ -70,6 +70,73 @@ let showLanguageBadges = true;
 // Settings → Preferences → "Send tasks with". Which AI CLI the per-task send
 // buttons launch ("claude" | "codex"). Round-trips via /api/projects.
 let taskAgent = "claude";
+// ── Card buttons (Settings → "Card buttons") ──────────────────────────────
+// The full roster of tools a card action button can be. `group` drives the
+// Settings editor's tabs (IDEs vs AI agents); `modes: true` marks tools that
+// can open EITHER their desktop app or a terminal CLI (Claude, Codex) — that
+// choice lives on the slot as mode: "app" | "cli". Cards are repainted from
+// this map on every rebuild, so the template's baked-in buttons are just
+// skeletons.
+const VENDOR_TOOLS = {
+  vscode: {
+    label: "VS Code",
+    cls: "vendor-vscode",
+    group: "ide",
+    // Official VS Code wedge (Microsoft).
+    svg: '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4608 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4609 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0415L12.1872 25.0096C10.589 23.7965 8.35363 23.8959 6.86933 25.2461L1.36303 30.2549C-0.452552 31.9064 -0.454633 34.7627 1.35853 36.417L16.2471 50.0001L1.35853 63.5832C-0.454633 65.2374 -0.452552 68.0938 1.36303 69.7453L6.86933 74.7541C8.35363 76.1043 10.589 76.2037 12.1872 74.9905L29.3551 61.9587L68.769 97.9167C69.3925 98.5406 70.1246 99.0104 70.8511 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z"/></svg>',
+  },
+  cursor: {
+    label: "Cursor",
+    cls: "vendor-cursor",
+    group: "ide",
+    // Official Cursor mark (Anysphere) — via simple-icons.
+    svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>',
+  },
+  antigravity: {
+    label: "Antigravity",
+    cls: "vendor-antigravity",
+    group: "ide",
+    // Official Google Antigravity mark — via lobehub's brand-icon set
+    // (matches svgl's copy of the same logo).
+    svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"/></svg>',
+  },
+  claude: {
+    label: "Claude Code",
+    cls: "vendor-claude",
+    group: "ai",
+    modes: true,
+    // Official Claude Code mark (Anthropic).
+    svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/></svg>',
+  },
+  codex: {
+    label: "Codex",
+    cls: "vendor-codex",
+    group: "ai",
+    modes: true,
+    // Official OpenAI / ChatGPT mark.
+    svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><path d="M9.20509 8.76511V6.50545C9.20509 6.31513 9.27649 6.17234 9.44293 6.0773L13.9861 3.46088C14.6046 3.10413 15.342 2.93769 16.103 2.93769C18.9573 2.93769 20.7651 5.14983 20.7651 7.50454C20.7651 7.67098 20.7651 7.86129 20.7412 8.05161L16.0316 5.2924C15.7462 5.12596 15.4607 5.12596 15.1753 5.2924L9.20509 8.76511ZM19.8135 17.5659V12.1664C19.8135 11.8333 19.6708 11.5955 19.3854 11.429L13.4152 7.95633L15.3656 6.83833C15.5321 6.74328 15.6749 6.74328 15.8413 6.83833L20.3845 9.45474C21.6928 10.216 22.5728 11.8333 22.5728 13.4031C22.5728 15.2108 21.5025 16.8758 19.8135 17.5657V17.5659ZM7.80173 12.8088L5.8513 11.6671C5.68486 11.5721 5.61346 11.4293 5.61346 11.239V6.00613C5.61346 3.46111 7.56389 1.53433 10.2042 1.53433C11.2033 1.53433 12.1307 1.86743 12.9159 2.46202L8.2301 5.17371C7.94475 5.34015 7.80195 5.57798 7.80195 5.91109V12.809L7.80173 12.8088ZM12 15.2349L9.20509 13.6651V10.3351L12 8.76534L14.7947 10.3351V13.6651L12 15.2349ZM13.7958 22.4659C12.7967 22.4659 11.8693 22.1328 11.0841 21.5382L15.7699 18.8265C16.0553 18.6601 16.198 18.4222 16.198 18.0891V11.1912L18.1723 12.3329C18.3388 12.4279 18.4102 12.5707 18.4102 12.761V17.9939C18.4102 20.5389 16.4359 22.4657 13.7958 22.4657V22.4659ZM8.15848 17.1617L3.61528 14.5452C2.30696 13.784 1.42701 12.1667 1.42701 10.5969C1.42701 8.76534 2.52115 7.12414 4.20987 6.43428V11.8574C4.20987 12.1905 4.35266 12.4284 4.63802 12.5948L10.5846 16.0436L8.63415 17.1617C8.46771 17.2567 8.32492 17.2567 8.15848 17.1617ZM7.897 21.0625C5.20919 21.0625 3.23488 19.0407 3.23488 16.5432C3.23488 16.3529 3.25875 16.1626 3.2824 15.9723L7.96817 18.6839C8.25352 18.8504 8.53911 18.8504 8.82446 18.6839L14.7947 15.2351V17.4948C14.7947 17.6851 14.7233 17.8279 14.5568 17.9229L10.0136 20.5393C9.39518 20.8961 8.6578 21.0625 7.89677 21.0625H7.897ZM13.7958 23.8929C16.6739 23.8929 19.0762 21.8474 19.6235 19.1357C22.2874 18.4459 24 15.9484 24 13.4034C24 11.7383 23.2865 10.121 22.002 8.95542C22.121 8.45588 22.1924 7.95633 22.1924 7.45702C22.1924 4.0557 19.4331 1.51045 16.2458 1.51045C15.6037 1.51045 14.9852 1.60549 14.3668 1.81968C13.2963 0.773071 11.8215 0.107086 10.2042 0.107086C7.32606 0.107086 4.92383 2.15256 4.37653 4.86425C1.7126 5.55411 0 8.05161 0 10.5966C0 12.2617 0.713506 13.879 1.99795 15.0446C1.87904 15.5441 1.80764 16.0436 1.80764 16.543C1.80764 19.9443 4.56685 22.4895 7.75421 22.4895C8.39632 22.4895 9.01478 22.3945 9.63324 22.1803C10.7035 23.2269 12.1783 23.8929 13.7958 23.8929Z"/></svg>',
+  },
+  gemini: {
+    label: "Gemini",
+    cls: "vendor-gemini",
+    group: "ai",
+    // Official Google Gemini spark — via simple-icons.
+    svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg>',
+  },
+};
+// The three card slots: { tool, mode? }, mode only on two-mode tools. The
+// defaults mirror what the app always shipped: VS Code, Claude CLI, Codex CLI.
+const DEFAULT_CARD_BUTTONS = [{ tool: "vscode" }, { tool: "claude", mode: "cli" }, { tool: "codex", mode: "cli" }];
+function sanitizeCardButtons(list) {
+  return DEFAULT_CARD_BUTTONS.map((fallback, i) => {
+    const e = Array.isArray(list) && list[i] && VENDOR_TOOLS[list[i].tool] ? list[i] : fallback;
+    return VENDOR_TOOLS[e.tool].modes
+      ? { tool: e.tool, mode: e.mode === "app" ? "app" : "cli" }
+      : { tool: e.tool };
+  });
+}
+// Live value the grid paints from. Round-trips via /api/projects.
+let cardButtons = sanitizeCardButtons(null);
 // Per-filter drag-and-drop arrangements, keyed "all" / status id. Each filter
 // page sorts and saves independently; server prepends new arrivals.
 let projectOrders = {};
@@ -247,6 +314,7 @@ async function loadProjects() {
   // treated as enabled so existing installs keep their current behaviour.
   showLanguageBadges = data.showLanguageBadges !== false;
   taskAgent = data.taskAgent === "codex" ? "codex" : "claude";
+  cardButtons = sanitizeCardButtons(data.cardButtons);
   projectOrders = data.projectOrders || {};
   // Mirror to body attributes so CSS can globally suppress any rogue
   // badge element if the JS branch in buildCard / renderLanguages is ever
@@ -1542,10 +1610,20 @@ function buildCard(p) {
     toggleCardMenu(node, p);
   });
 
-  // Action buttons
-  node.querySelector(".action-vscode").addEventListener("click", () => openTool(p.slug, "vscode"));
-  node.querySelector(".action-claude").addEventListener("click", () => openTool(p.slug, "claude"));
-  node.querySelector(".action-codex")?.addEventListener("click",  () => openTool(p.slug, "codex"));
+  // Action buttons — all three painted from the card-buttons config
+  // (Settings → "Card buttons"): any mix of IDEs and AI agents, with
+  // Claude/Codex slots carrying their own app-vs-CLI open mode. Cards
+  // rebuild on every loadProjects, so a settings change repaints the whole
+  // grid without special handling here.
+  node.querySelectorAll(".card-actions .vendor-btn").forEach((btn, i) => {
+    const slot = cardButtons[i] || DEFAULT_CARD_BUTTONS[i];
+    const v = VENDOR_TOOLS[slot.tool];
+    btn.className = `btn vendor-btn ${v.cls}`;
+    btn.dataset.tool = slot.tool;
+    btn.querySelector(".vendor-mark").innerHTML = v.svg;
+    btn.querySelector(".vendor-label").textContent = v.label;
+    btn.addEventListener("click", () => openTool(p.slug, slot.tool, slot.mode));
+  });
 
   renderTasks(node, p);
 
@@ -1591,9 +1669,11 @@ async function updateStatus(slug, statusId) {
 }
 
 // ── Tools ─────────────────────────────────────────────────────────────────
-async function openTool(slug, tool) {
+// `mode` rides along for two-mode tools (Claude/Codex): "app" opens the
+// desktop app, "cli" (or absent) a terminal session.
+async function openTool(slug, tool, mode) {
   try {
-    const result = await api(`/api/projects/${slug}/open`, { method: "POST", body: { tool } });
+    const result = await api(`/api/projects/${slug}/open`, { method: "POST", body: { tool, mode } });
     // Server short-circuits when an installable CLI is missing from PATH
     // and returns {ok:false, notInstalled:true, ...} so we can show our
     // own confirmation modal instead of letting Windows 11 hijack with
@@ -1602,14 +1682,15 @@ async function openTool(slug, tool) {
       openInstallModal(result);
       return;
     }
-    const labels = { vscode: "VS Code", claude: "Claude Code", codex: "Codex", explorer: "File Explorer" };
-    toast({ kind: "info", title: `Opening ${labels[tool] || tool}…`, sub: "Launching in a new window." });
-    // For an interactive Claude/Codex terminal the server registers the new
-    // window ~1.4s after launch; refetch shortly after so the card's session
-    // badge lights up without waiting for the next poll. loadProjects starts
-    // the poll loop (anyTasksInProgress now counts live sessions), which then
-    // clears the badge once the user closes the terminal.
-    if ((tool === "claude" || tool === "codex") && !(result && result.notInstalled)) {
+    const label = tool === "explorer" ? "File Explorer" : (VENDOR_TOOLS[tool]?.label || tool);
+    toast({ kind: "info", title: `Opening ${label}…`, sub: "Launching in a new window." });
+    // For an interactive AI terminal the server registers the new window
+    // ~1.4s after launch; refetch shortly after so the card's session badge
+    // lights up without waiting for the next poll. loadProjects starts the
+    // poll loop (anyTasksInProgress now counts live sessions), which then
+    // clears the badge once the user closes the terminal. Desktop-app opens
+    // create no tracked window, so they skip the refetch.
+    if ((tool === "claude" || tool === "codex" || tool === "gemini") && mode !== "app") {
       setTimeout(() => { loadProjects().catch(() => {}); }, 2000);
     }
   } catch (err) {
@@ -1622,12 +1703,18 @@ const installModal     = document.getElementById("modal-install");
 const installTextEl    = document.getElementById("install-text");
 const installCmdEl     = document.getElementById("install-cmd");
 const installAllowBtn  = document.getElementById("install-allow");
-let pendingInstall = null;   // { tool, displayName, installCmd }
+let pendingInstall = null;   // { tool, displayName, installCmd, slug?, autoLaunch? }
+const installAfterEl = document.getElementById("install-after");
 
 function openInstallModal(payload) {
   pendingInstall = payload;
   installTextEl.textContent = `${payload.displayName} isn't installed on this PC. Allow Coding Drives to install it for you?`;
   installCmdEl.textContent  = payload.installCmd;
+  // IDE installs chain a launch of the project that triggered the prompt;
+  // CLI installs still need a re-click once npm finishes.
+  installAfterEl.textContent = payload.autoLaunch
+    ? `A terminal window will open so you can see the install progress — when it finishes, this project opens in ${payload.displayName} automatically.`
+    : "A terminal window will open so you can see the install progress. Re-open the project once the install completes.";
   installAllowBtn.disabled = false;
   installModal.style.display = "";
   installModal.classList.add("is-open");
@@ -1642,11 +1729,17 @@ installModal.querySelectorAll(".modal-close, .modal-backdrop").forEach((el) =>
 );
 installAllowBtn.addEventListener("click", async () => {
   if (!pendingInstall) return;
-  const { tool, displayName } = pendingInstall;
+  const { tool, displayName, slug } = pendingInstall;
   installAllowBtn.disabled = true;
   try {
-    await api(`/api/tools/install`, { method: "POST", body: { tool } });
-    toast({ kind: "info", title: `Installing ${displayName}…`, sub: "Re-open the project once the terminal finishes." });
+    const r = await api(`/api/tools/install`, { method: "POST", body: { tool, slug } });
+    toast({
+      kind: "info",
+      title: `Installing ${displayName}…`,
+      sub: r.willLaunch
+        ? "The project will open there on its own when the install finishes."
+        : "Re-open the project once the terminal finishes.",
+    });
     closeInstallModal();
   } catch (err) {
     toast({ kind: "error", title: "Install failed to start", sub: err.message });
@@ -2653,17 +2746,20 @@ function openSettings() {
       // Language badges default to ON when the key isn't present — keeps
       // existing installs behaving the same way after this upgrade.
       showLanguageBadges: cfg.showLanguageBadges !== false,
-      // Off by default — the Claude button keeps its terminal behaviour until
-      // the user opts into the desktop-app deep link.
-      openClaudeInDesktop: cfg.openClaudeInDesktop === true,
-      // Same opt-in for Codex (uses `codex app <folder>` instead of a deep link).
-      openCodexInDesktop: cfg.openCodexInDesktop === true,
       // Off by default — when on, task/publish sessions run hidden and close
       // themselves once the work is done (no lingering terminal windows).
       headlessTerminals: cfg.headlessTerminals === true,
       // Which AI CLI the task send buttons launch. Claude unless opted out.
       taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
+      // The three card action buttons ({ tool, mode? } each). The server
+      // serves this pre-sanitized, incl. migration from the old
+      // ideButton/desktop-toggle keys; sanitize again anyway so the editor
+      // can trust every slot.
+      cardButtons: sanitizeCardButtons(cfg.cardButtons),
     };
+    // Card-buttons editor starts armed on slot 1, tab matching its tool.
+    cardBtnActiveSlot = 0;
+    cardBtnActiveTab = VENDOR_TOOLS[settingsState.cardButtons[0].tool].group;
     renderSettings();
     settingsError("");
     settingsModal.style.display = "";
@@ -2693,15 +2789,6 @@ document.getElementById("set-show-stack")?.addEventListener("change", (e) => {
 document.getElementById("set-show-langs")?.addEventListener("change", (e) => {
   if (settingsState) settingsState.showLanguageBadges = e.target.checked;
 });
-// Claude desktop-app toggle — same pattern. Routes the Claude button to the
-// claude:// deep link when on (handled server-side in /api/projects/:slug/open).
-document.getElementById("set-claude-desktop")?.addEventListener("change", (e) => {
-  if (settingsState) settingsState.openClaudeInDesktop = e.target.checked;
-});
-// Codex desktop-app toggle — routes the Codex button to `codex app <folder>`.
-document.getElementById("set-codex-desktop")?.addEventListener("change", (e) => {
-  if (settingsState) settingsState.openCodexInDesktop = e.target.checked;
-});
 // Headless background terminals — task/publish sessions run hidden and exit
 // when done (handled server-side in spawnAiPrompt's headless branch).
 document.getElementById("set-headless-terminals")?.addEventListener("change", (e) => {
@@ -2724,6 +2811,123 @@ document.getElementById("set-task-agent")?.addEventListener("click", (e) => {
   if (settingsState) settingsState.taskAgent = opt.dataset.value === "codex" ? "codex" : "claude";
   setTaskAgentSegment(opt.dataset.value);
 });
+// ── Card-buttons editor (Settings → "Card buttons") ───────────────────────
+// Three slot chips + a category tab + a tile grid. Click a slot to arm it,
+// click a tile to put that tool in the armed slot. Picking a tool that
+// already lives in another slot swaps the two entries (modes and all), so
+// the three buttons stay distinct without any error states. Claude/Codex
+// slots grow an App|CLI mini-switch for what their button opens.
+let cardBtnActiveSlot = 0;
+let cardBtnActiveTab = "ide";
+
+function renderCardButtonsEditor() {
+  const slotsHost = document.getElementById("set-cardbtn-slots");
+  const grid = document.getElementById("set-cardbtn-grid");
+  if (!slotsHost || !grid || !settingsState) return;
+  const list = settingsState.cardButtons;
+
+  // Slot chips — divs, not <button>s, because the App|CLI mini-switch nests
+  // real buttons inside and buttons can't contain buttons.
+  slotsHost.innerHTML = "";
+  list.forEach((slot, i) => {
+    const v = VENDOR_TOOLS[slot.tool];
+    const el = document.createElement("div");
+    el.className = "cardbtn-slot";
+    el.dataset.active = String(i === cardBtnActiveSlot);
+    el.setAttribute("role", "button");
+    el.tabIndex = 0;
+    el.setAttribute("aria-label", `Button ${i + 1}: ${v.label}. Click to choose a different tool.`);
+
+    const num = document.createElement("span");
+    num.className = "cardbtn-slot-num";
+    num.textContent = `Button ${i + 1}`;
+
+    const mark = document.createElement("span");
+    mark.className = "cardbtn-slot-mark";
+    mark.innerHTML = v.svg;
+
+    const name = document.createElement("span");
+    name.className = "cardbtn-slot-name";
+    name.textContent = v.label;
+
+    el.append(num, mark, name);
+
+    if (v.modes) {
+      const sw = document.createElement("span");
+      sw.className = "cardbtn-mode";
+      for (const m of ["app", "cli"]) {
+        const opt = document.createElement("button");
+        opt.type = "button";
+        opt.textContent = m === "app" ? "App" : "CLI";
+        opt.dataset.on = String((slot.mode || "cli") === m);
+        opt.setAttribute("aria-label", `${v.label} opens the ${m === "app" ? "desktop app" : "terminal CLI"}`);
+        opt.addEventListener("click", (e) => {
+          e.stopPropagation();
+          slot.mode = m;
+          cardBtnActiveSlot = i;
+          renderCardButtonsEditor();
+        });
+        sw.appendChild(opt);
+      }
+      el.appendChild(sw);
+    }
+
+    const arm = () => {
+      cardBtnActiveSlot = i;
+      cardBtnActiveTab = VENDOR_TOOLS[list[i].tool].group;
+      renderCardButtonsEditor();
+    };
+    el.addEventListener("click", arm);
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); arm(); }
+    });
+    slotsHost.appendChild(el);
+  });
+
+  // Category tab (IDEs | AI agents)
+  const tabs = document.getElementById("set-cardbtn-tabs");
+  tabs.dataset.active = cardBtnActiveTab;
+  tabs.querySelectorAll(".gh-vis-opt").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.value === cardBtnActiveTab))
+  );
+
+  // Tool tiles for the active tab
+  grid.innerHTML = "";
+  for (const [key, v] of Object.entries(VENDOR_TOOLS)) {
+    if (v.group !== cardBtnActiveTab) continue;
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "gh-cli-card cardbtn-tile";
+    tile.setAttribute("aria-checked", String(list[cardBtnActiveSlot].tool === key));
+    const icon = document.createElement("span");
+    icon.className = "gh-cli-icon cardbtn-tile-icon";
+    icon.innerHTML = v.svg;
+    const title = document.createElement("span");
+    title.className = "gh-cli-title";
+    title.textContent = v.label;
+    tile.append(icon, title);
+    tile.addEventListener("click", () => {
+      const cur = list[cardBtnActiveSlot];
+      if (cur.tool === key) return;
+      // If another slot already holds this tool, swap the two entries so a
+      // pick never produces duplicate buttons.
+      const other = list.findIndex((s) => s.tool === key);
+      const incoming = other !== -1
+        ? list[other]
+        : (VENDOR_TOOLS[key].modes ? { tool: key, mode: "cli" } : { tool: key });
+      if (other !== -1) list[other] = cur;
+      list[cardBtnActiveSlot] = incoming;
+      renderCardButtonsEditor();
+    });
+    grid.appendChild(tile);
+  }
+}
+document.getElementById("set-cardbtn-tabs")?.addEventListener("click", (e) => {
+  const opt = e.target.closest(".gh-vis-opt");
+  if (!opt) return;
+  cardBtnActiveTab = opt.dataset.value === "ai" ? "ai" : "ide";
+  renderCardButtonsEditor();
+});
 
 // Display form for a scan-folder pill: drop the leading "<drive>:\Users\<name>\"
 // so the badge reads e.g. "Documents\♾️ Coding Projects - Local" (or just
@@ -2745,16 +2949,13 @@ function renderSettings() {
   // Language-badge toggle
   const showLangsEl = document.getElementById("set-show-langs");
   if (showLangsEl) showLangsEl.checked = !!settingsState.showLanguageBadges;
-  // Claude desktop-app toggle
-  const claudeDesktopEl = document.getElementById("set-claude-desktop");
-  if (claudeDesktopEl) claudeDesktopEl.checked = !!settingsState.openClaudeInDesktop;
-  const codexDesktopEl = document.getElementById("set-codex-desktop");
-  if (codexDesktopEl) codexDesktopEl.checked = !!settingsState.openCodexInDesktop;
   // Headless background terminals toggle
   const headlessEl = document.getElementById("set-headless-terminals");
   if (headlessEl) headlessEl.checked = !!settingsState.headlessTerminals;
   // Task agent segment
   setTaskAgentSegment(settingsState.taskAgent);
+  // Card-buttons editor (slots + tabs + tiles)
+  renderCardButtonsEditor();
 
   // Logo preview — bust cache so a freshly uploaded file shows.
   document.getElementById("set-logo-preview").src = "/api/logo?t=" + Date.now();
@@ -3044,10 +3245,13 @@ document.getElementById("set-save").addEventListener("click", async () => {
     statuses,
     showStackBadge: !!settingsState.showStackBadge,
     showLanguageBadges: !!settingsState.showLanguageBadges,
-    openClaudeInDesktop: !!settingsState.openClaudeInDesktop,
-    openCodexInDesktop: !!settingsState.openCodexInDesktop,
     headlessTerminals: !!settingsState.headlessTerminals,
     taskAgent: settingsState.taskAgent === "codex" ? "codex" : "claude",
+    cardButtons: sanitizeCardButtons(settingsState.cardButtons),
+    // Legacy mirrors of the slot modes — other server paths (and any older
+    // build reading the same user-config) still honour these keys.
+    openClaudeInDesktop: settingsState.cardButtons.some((b) => b.tool === "claude" && b.mode === "app"),
+    openCodexInDesktop: settingsState.cardButtons.some((b) => b.tool === "codex" && b.mode === "app"),
   };
   try {
     const saved = await api("/api/config", { method: "POST", body: patch });

@@ -445,6 +445,9 @@ body {
 .vendor-vscode .vendor-mark svg { width: 15px; height: 15px; }
 .vendor-claude .vendor-mark svg { width: 17px; height: 17px; }
 .vendor-codex  .vendor-mark svg { width: 16px; height: 16px; }
+.vendor-cursor .vendor-mark svg { width: 15px; height: 15px; }
+.vendor-antigravity .vendor-mark svg { width: 16px; height: 16px; }
+.vendor-gemini .vendor-mark svg { width: 16px; height: 16px; }
 .vendor-btn .vendor-label { line-height: 1; letter-spacing: 0.01em; }
 
 /* Hover flips the button fill from neutral to brand. No colored drop shadow
@@ -471,6 +474,29 @@ body {
   color: #0a0a0a;
 }
 .vendor-codex:hover .vendor-mark { color: #0a0a0a; }
+
+/* Cursor: near-black brand surface (cursor.com). Slight lift between the two
+   stops so the hover doesn't read as a flat void against the dark card. */
+.vendor-cursor:hover {
+  background: linear-gradient(180deg, #2e2e33, #141416);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* Antigravity: Google's dark-launch branding with a warm coral accent —
+   distinct from Gemini's cool spark so the two Google entries never blur. */
+.vendor-antigravity:hover {
+  background: linear-gradient(180deg, #ff8a5e, #f25a35);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* Gemini: Google's blue→violet spark gradient. */
+.vendor-gemini:hover {
+  background: linear-gradient(135deg, #4796e3, #9177c7);
+  border-color: transparent;
+  color: #fff;
+}
 
 /* ── Filters row ──────────────────────────────────────────────────────────── */
 .filters {
@@ -1599,6 +1625,71 @@ body:has(.modal.is-open) { overflow: hidden; }
 .gh-vis-segment[data-active="codex"]   .gh-vis-thumb {
   transform: translateX(100%);
 }
+/* Card-buttons editor tab (IDEs | AI agents) — second value slides the thumb. */
+.gh-vis-segment[data-active="ai"] .gh-vis-thumb { transform: translateX(100%); }
+/* The card-buttons editor needs the full modal width, so its row stacks:
+   label block on top, slots/tab/tiles underneath. */
+.settings-row-stack { flex-direction: column; align-items: stretch; gap: 10px; }
+.settings-row-stack .gh-vis-segment { display: grid; }
+
+/* ── Card-buttons editor (Settings) ──────────────────────────────────────
+   Three slot cards (the card's buttons as they'll appear — active one is
+   violet-ringed), the category tab, and a tile grid that assigns the
+   clicked tool into the armed slot. Tiles reuse .gh-cli-card so the picker
+   reads like the publish modal's CLI chooser. */
+.cardbtn-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cardbtn-slot {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  min-width: 0;
+  padding: 9px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.cardbtn-slot:hover { border-color: var(--ring); }
+.cardbtn-slot[data-active="true"] {
+  border-color: var(--brand-500);
+  background: var(--tile-violet-bg);
+  box-shadow: 0 0 0 1px var(--brand-500) inset;
+}
+.cardbtn-slot-num {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--fg-3);
+}
+.cardbtn-slot-mark { color: var(--fg-1); }
+.cardbtn-slot-mark svg { display: block; width: 16px; height: 16px; }
+.cardbtn-slot-name {
+  max-width: 100%;
+  font-size: 11.5px; font-weight: 600; color: var(--fg-1); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* App|CLI mini-switch inside a Claude/Codex slot. */
+.cardbtn-mode {
+  display: inline-flex; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px;
+}
+.cardbtn-mode button {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 2px 9px; border-radius: 999px;
+  font: inherit; font-size: 10.5px; font-weight: 600; color: var(--fg-3);
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.cardbtn-mode button[data-on="true"] {
+  background: var(--tile-violet-bg);
+  box-shadow: 0 0 0 1px var(--brand-500) inset;
+  color: var(--fg-1);
+}
+.cardbtn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* Compact spin on .gh-cli-card for the 3-across tool tiles. */
+.cardbtn-tile { padding: 9px 10px; gap: 8px; min-width: 0; }
+.cardbtn-tile .gh-cli-title {
+  font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cardbtn-tile-icon { flex-shrink: 0; }
+.cardbtn-tile-icon svg { display: block; width: 15px; height: 15px; }
 .gh-vis-opt {
   position: relative;
   z-index: 1;
@@ -1619,7 +1710,9 @@ body:has(.modal.is-open) { overflow: hidden; }
 .gh-vis-segment[data-active="overwrite"] .gh-vis-opt[data-value="overwrite"],
 .gh-vis-segment[data-active="release"]   .gh-vis-opt[data-value="release"],
 .gh-vis-segment[data-active="claude"]    .gh-vis-opt[data-value="claude"],
-.gh-vis-segment[data-active="codex"]     .gh-vis-opt[data-value="codex"] {
+.gh-vis-segment[data-active="codex"]     .gh-vis-opt[data-value="codex"],
+.gh-vis-segment[data-active="ide"]       .gh-vis-opt[data-value="ide"],
+.gh-vis-segment[data-active="ai"]        .gh-vis-opt[data-value="ai"] {
   color: var(--fg-1);
 }
 /* ── Add Project modal ──────────────────────────────────────────────────── */

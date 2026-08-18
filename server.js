@@ -92,6 +92,31 @@ function loadConfig() {
   return cfg;
 }
 
+// ── Card buttons (Settings → "Card buttons") ────────────────────────────────
+// The three action buttons every project card shows. Each slot is
+// { tool, mode? } where tool ∈ CARD_BUTTON_TOOLS and mode ("app" | "cli")
+// only applies to Claude/Codex, which can open either their desktop app or a
+// terminal CLI. Older configs carry the same intent across three legacy keys
+// (ideButton + openClaudeInDesktop + openCodexInDesktop), so missing/invalid
+// slots fall back to what those keys say — an existing setup upgrades into
+// the exact same three buttons it had before.
+const CARD_BUTTON_TOOLS = new Set(["vscode", "cursor", "antigravity", "claude", "codex", "gemini"]);
+function sanitizeCardButtons(cfg) {
+  const raw = Array.isArray(cfg.cardButtons) ? cfg.cardButtons : [];
+  const legacyIde = ["cursor", "antigravity", "gemini"].includes(cfg.ideButton) ? cfg.ideButton : "vscode";
+  const defaults = [
+    { tool: legacyIde },
+    { tool: "claude", mode: cfg.openClaudeInDesktop === true ? "app" : "cli" },
+    { tool: "codex",  mode: cfg.openCodexInDesktop  === true ? "app" : "cli" },
+  ];
+  return defaults.map((fallback, i) => {
+    const e = raw[i] && CARD_BUTTON_TOOLS.has(raw[i].tool) ? raw[i] : fallback;
+    return (e.tool === "claude" || e.tool === "codex")
+      ? { tool: e.tool, mode: e.mode === "app" ? "app" : "cli" }
+      : { tool: e.tool };
+  });
+}
+
 // Default backup destination — the user's Documents folder when nothing else is configured.
 function defaultBackupPath() {
   const home = process.env.USERPROFILE || process.env.HOME || "";
@@ -861,7 +886,10 @@ const asyncRoute = (fn) => (req, res, next) => {
 };
 
 app.get("/api/config", (_req, res) => {
-  res.json(loadConfig());
+  const cfg = loadConfig();
+  // cardButtons is served pre-sanitized (with legacy-key fallbacks applied)
+  // so the Settings modal always sees three valid slots to edit.
+  res.json({ ...cfg, cardButtons: sanitizeCardButtons(cfg) });
 });
 
 app.post("/api/config", asyncRoute(async (req, res) => {
@@ -1152,6 +1180,11 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
     // Which AI CLI the per-task send buttons launch (Settings → Preferences).
     // Surfaced here so the frontend can label its send toasts correctly.
     taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
+    // The three card action buttons (Settings → "Card buttons"): each slot
+    // is { tool, mode? } — the frontend paints the buttons from this and
+    // passes the slot's mode back when opening, so Claude/Codex buttons know
+    // whether they open the desktop app or a terminal CLI.
+    cardButtons: sanitizeCardButtons(cfg),
     // Per-filter drag-and-drop arrangements — the client sorts the grid by
     // the active filter's list.
     projectOrders: orders,
@@ -2353,6 +2386,17 @@ function spawnTerminal(folder, cmd) {
   ).unref();
 }
 
+// PowerShell flavour of spawnTerminal — for commands that need PS features
+// (conditional chaining, re-reading PATH after an install). -NoExit keeps the
+// window open so the user sees the output either way.
+function spawnTerminalPS(folder, ps) {
+  return spawn(
+    "cmd.exe",
+    ["/c", "start", "", "wt.exe", "-d", folder, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+    { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+  ).unref();
+}
+
 // Live headless-session logs, keyed by log-file path → { startedAt, title }.
 // Headless sessions have no window, so we remember each one's log file while it
 // runs; the session badge opens a terminal that live-tails these (see
@@ -3090,7 +3134,29 @@ function spawnCodexDesktop(folder, codexCmd) {
 const INSTALLABLE_TOOLS = {
   claude: { displayName: "Claude Code", npmPackage: "@anthropic-ai/claude-code" },
   codex:  { displayName: "Codex",       npmPackage: "@openai/codex" },
+  gemini: { displayName: "Gemini CLI",  npmPackage: "@google/gemini-cli" },
 };
+
+// The IDE family the card's first button can open (Settings → "IDE button").
+// These aren't npm packages — they install through winget (bundled with
+// Windows 11), and each one drops a VS Code-style launcher on PATH, which is
+// also what we probe to decide "installed or not". cfg.tools can override the
+// launcher per IDE; ideLauncher() applies that override consistently.
+const INSTALLABLE_IDES = {
+  vscode:      { displayName: "VS Code",     wingetId: "Microsoft.VisualStudioCode", launcher: "code.cmd" },
+  cursor:      { displayName: "Cursor",      wingetId: "Anysphere.Cursor",           launcher: "cursor.cmd" },
+  antigravity: { displayName: "Antigravity", wingetId: "Google.Antigravity",         launcher: "antigravity.cmd" },
+};
+function ideLauncher(cfg, tool) {
+  return cfg.tools?.[tool] || INSTALLABLE_IDES[tool].launcher;
+}
+// cfg.tools may hold either a bare PATH command ("cursor.cmd") or an absolute
+// path ("C:\...\bin\code.cmd"). where.exe only understands the former — it
+// parses a colon as its $env:pattern syntax — so absolute paths are checked
+// directly on disk instead.
+function isLauncherAvailable(cmd) {
+  return /[\\/]/.test(cmd) ? fs.existsSync(cmd) : isCommandOnPath(cmd);
+}
 
 // Synchronous PATH check via Windows' `where.exe`. Exit code 0 means the
 // command is resolvable on PATH (or one of the PATHEXT extensions). ~10ms
@@ -3145,6 +3211,7 @@ function cliCommandLine(p) {
 const AI_AUTONOMY_FLAGS = {
   claude: "--permission-mode bypassPermissions",
   codex: "--dangerously-bypass-approvals-and-sandbox",
+  gemini: "--yolo",
 };
 
 // ─── Auto-accept (launch-prompt pre-seeding) ─────────────────────────────────
@@ -3271,12 +3338,17 @@ app.post("/api/projects/:slug/open", async (req, res) => {
   if (!fs.existsSync(folder)) return res.status(404).json({ error: "folder not found" });
 
   const tool = req.body?.tool;
+  // Per-button open mode from the card-buttons config ("app" | "cli"),
+  // passed by the frontend with each click. Absent (older frontend, direct
+  // API use) falls back to the legacy desktop toggles.
+  const mode = req.body?.mode === "app" ? "app" : (req.body?.mode === "cli" ? "cli" : null);
 
-  // Claude "desktop mode" (Settings toggle) routes the Claude button to the
-  // desktop app via deep link instead of the CLI. In that mode the CLI being
-  // on PATH is irrelevant — the claude:// scheme is what matters — so we skip
-  // the install gate below to avoid a spurious "not installed" prompt.
-  const claudeDesktop = tool === "claude" && cfg.openClaudeInDesktop === true;
+  // Claude "desktop mode" routes the Claude button to the desktop app via
+  // deep link instead of the CLI. In that mode the CLI being on PATH is
+  // irrelevant — the claude:// scheme is what matters — so we skip the
+  // install gate below to avoid a spurious "not installed" prompt.
+  const claudeDesktop = tool === "claude" && (mode ? mode === "app" : cfg.openClaudeInDesktop === true);
+  const codexDesktop  = tool === "codex"  && (mode ? mode === "app" : cfg.openCodexInDesktop === true);
 
   // Pre-flight install gate. If the requested CLI isn't on PATH we DON'T
   // shell out — instead respond 200 with a notInstalled flag so the
@@ -3297,9 +3369,39 @@ app.post("/api/projects/:slug/open", async (req, res) => {
     }
   }
 
+  // Same gate for the IDE family, winget flavour. slug + autoLaunch ride
+  // along so the install flow can ask permission in-app and then open THIS
+  // project in the freshly installed IDE instead of leaving the user to
+  // come back and click again.
+  if (tool && INSTALLABLE_IDES[tool] && !isLauncherAvailable(ideLauncher(cfg, tool))) {
+    const meta = INSTALLABLE_IDES[tool];
+    return res.json({
+      ok: false,
+      notInstalled: true,
+      tool,
+      displayName: meta.displayName,
+      installCmd: `winget install --id ${meta.wingetId}`,
+      slug: req.params.slug,
+      autoLaunch: true,
+    });
+  }
+
   try {
-    if (tool === "vscode") {
-      spawnDetached(cfg.tools.vscode, [folder]);
+    if (INSTALLABLE_IDES[tool]) {
+      // VS Code / Cursor / Antigravity — all ship the same VS Code-style
+      // launcher, so one branch covers the family. The gate above already
+      // guaranteed the launcher is on PATH.
+      spawnDetached(ideLauncher(cfg, tool), [folder]);
+    } else if (tool === "gemini") {
+      // Gemini CLI in a tracked terminal, same shape as the Claude/Codex
+      // branches below. No trust pre-seeding: Gemini's folder-trust gate is
+      // opt-in (security.folderTrust, off by default) so a fresh folder
+      // doesn't prompt, and --yolo pre-grants the per-action approvals.
+      spawnTrackedTerminal(
+        folder,
+        `${cliCommandLine(resolveCliPath(cfg.tools.gemini || "gemini"))} ${AI_AUTONOMY_FLAGS.gemini}`,
+        { slug: req.params.slug, agent: "gemini" }
+      );
     } else if (tool === "claude") {
       // Pre-answer the CLI's one-time launch prompts so it never stops to
       // ask (no-op when everything is already accepted).
@@ -3317,7 +3419,7 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       // Codex's terminal TUI and `codex app` desktop launcher share the same
       // config.toml trust table, so pre-trust covers both modes.
       ensureFolderTrusted(folder, "codex");
-      if (cfg.openCodexInDesktop === true) {
+      if (codexDesktop) {
         spawnCodexDesktop(folder, cfg.tools.codex || "codex");
       } else {
         spawnTrackedTerminal(
@@ -3363,18 +3465,38 @@ app.post("/api/projects/:slug/open", async (req, res) => {
 // instead of having an installation happen invisibly in the background.
 app.post("/api/tools/install", async (req, res) => {
   const tool = req.body?.tool;
-  const meta = INSTALLABLE_TOOLS[tool];
-  if (!meta) return res.status(400).json({ error: "unknown tool" });
+  const cliMeta = INSTALLABLE_TOOLS[tool];
+  const ideMeta = INSTALLABLE_IDES[tool];
+  if (!cliMeta && !ideMeta) return res.status(400).json({ error: "unknown tool" });
 
   // cwd for the install terminal: user's home directory. Doesn't matter for
   // a global install, but it's a sane place for the shell to land.
   const cwd = process.env.USERPROFILE || process.env.HOME || __dirname;
   try {
-    // Defensive quoting — the package strings in INSTALLABLE_TOOLS are
-    // controlled, but quoting prevents future entries with hyphens or scopes
-    // from being misparsed by `cmd /k`.
-    spawnTerminal(cwd, `npm install -g "${meta.npmPackage}"`);
-    res.json({ ok: true, displayName: meta.displayName });
+    if (cliMeta) {
+      // Defensive quoting — the package strings in INSTALLABLE_TOOLS are
+      // controlled, but quoting prevents future entries with hyphens or scopes
+      // from being misparsed by `cmd /k`.
+      spawnTerminal(cwd, `npm install -g "${cliMeta.npmPackage}"`);
+      return res.json({ ok: true, displayName: cliMeta.displayName });
+    }
+
+    // IDE flow: winget install, then open the project that triggered the
+    // prompt in the fresh IDE — from the SAME window, so the user watches one
+    // continuous story instead of coming back to click the button again.
+    // PowerShell (not cmd /k) because the launcher lands on PATH mid-session:
+    // re-reading the User+Machine PATH is what makes the brand-new
+    // `code`/`cursor`/`antigravity` command resolvable without a new shell.
+    let folder = "";
+    try { if (req.body?.slug) folder = fromSlug(String(req.body.slug)); } catch {}
+    if (folder && !fs.existsSync(folder)) folder = "";
+    const psq = (s) => `'${String(s).replace(/'/g, "''")}'`;
+    const launcher = ideLauncher(loadConfig(), tool);
+    const chain = folder
+      ? `; if ($LASTEXITCODE -eq 0) { $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine'); & ${psq(launcher)} ${psq(folder)} } else { Write-Host ''; Write-Host 'Install did not finish - you can grab ${ideMeta.displayName} from its website instead.' }`
+      : "";
+    spawnTerminalPS(cwd, `winget install --id ${ideMeta.wingetId} -e --accept-source-agreements --accept-package-agreements${chain}`);
+    res.json({ ok: true, displayName: ideMeta.displayName, willLaunch: !!folder });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4392,8 +4514,11 @@ app.post("/api/projects/:slug/github/prepare", async (req, res) => {
           excludeFolders: [".git", ".vscode", ".idea", "node_modules"],
           tools: {
             vscode: isUserPath(raw.tools?.vscode) ? "code.cmd" : (raw.tools?.vscode || "code.cmd"),
+            cursor: isUserPath(raw.tools?.cursor) ? "cursor.cmd" : (raw.tools?.cursor || "cursor.cmd"),
+            antigravity: isUserPath(raw.tools?.antigravity) ? "antigravity.cmd" : (raw.tools?.antigravity || "antigravity.cmd"),
             claude: raw.tools?.claude || "claude",
             codex: raw.tools?.codex || "codex",
+            gemini: raw.tools?.gemini || "gemini",
             windowsTerminal: isUserPath(raw.tools?.windowsTerminal) ? "wt.exe" : (raw.tools?.windowsTerminal || "wt.exe"),
           },
         };

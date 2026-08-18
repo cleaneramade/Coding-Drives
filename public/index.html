@@ -183,25 +183,24 @@
                 <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
               </span>
             </div>
-            <div class="settings-toggle-row">
+            <!-- Card-buttons builder. Three slots mirror the three action
+                 buttons on every card; click a slot, then pick its tool from
+                 the tabbed tile grid below (IDEs vs AI agents). Claude/Codex
+                 slots grow an App|CLI mini-switch — that replaces the old
+                 separate "Open X in the desktop app" toggles. All rendering
+                 happens in renderCardButtonsEditor() (app.js). -->
+            <div class="settings-toggle-row settings-row-stack">
               <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Open Claude in the desktop app</span>
-                <p class="settings-help">Open projects in the Claude desktop app instead of a terminal.</p>
+                <span class="settings-toggle-title">Card buttons</span>
+                <p class="settings-help">Choose the three action buttons every project card shows. Click a slot, then pick what lives there. Claude and Codex can open as their desktop app or a terminal CLI — and if a pick isn't installed yet, its button offers to install it.</p>
               </div>
-              <span class="switch">
-                <input type="checkbox" id="set-claude-desktop" aria-label="Open Claude in the desktop app" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              </span>
-            </div>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Open Codex in the desktop app</span>
-                <p class="settings-help">Open projects in the Codex desktop app instead of a terminal.</p>
+              <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
+              <div class="gh-vis-segment cardbtn-tabs" id="set-cardbtn-tabs" data-active="ide" role="tablist" aria-label="Tool category">
+                <span class="gh-vis-thumb" aria-hidden="true"></span>
+                <button type="button" class="gh-vis-opt" data-value="ide" aria-pressed="true">IDEs</button>
+                <button type="button" class="gh-vis-opt" data-value="ai" aria-pressed="false">AI agents</button>
               </div>
-              <span class="switch">
-                <input type="checkbox" id="set-codex-desktop" aria-label="Open Codex in the desktop app" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              </span>
+              <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
             </div>
             <div class="settings-toggle-row">
               <div class="settings-toggle-label">
@@ -623,10 +622,12 @@
   </div>
 
   <!-- ── Install confirmation modal ─────────────────────────────────────
-       Shown when a user clicks Claude/Codex on a card but the CLI isn't on
-       PATH. Server side returns {notInstalled: true, ...}; frontend opens
-       this modal so the user can opt in to the install rather than having
-       Windows hijack with its own "install from Store" prompt. -->
+       Shown when a card button's tool isn't installed — an AI CLI (Claude/
+       Codex/Gemini, npm) or an IDE (VS Code/Cursor/Antigravity, winget).
+       Server side returns {notInstalled: true, ...}; frontend opens this
+       modal so the user can opt in to the install rather than having
+       Windows hijack with its own "install from Store" prompt. IDE installs
+       also carry the project slug so the fresh IDE opens it right after. -->
   <div class="modal" id="modal-install" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-install-title">
     <div class="modal-backdrop"></div>
     <div class="modal-card">
@@ -639,7 +640,9 @@
       <div class="modal-body">
         <p class="modal-help" id="install-text"></p>
         <pre class="install-cmd" id="install-cmd"></pre>
-        <p class="modal-help">A terminal window will open so you can see the install progress. Re-open the project once the install completes.</p>
+        <!-- Follow-up line is set by openInstallModal(): IDE installs chain a
+             launch of the project, CLI installs still ask for a re-click. -->
+        <p class="modal-help" id="install-after"></p>
       </div>
       <footer class="modal-foot">
         <div class="modal-foot-row">

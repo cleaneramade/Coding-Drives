@@ -16,3 +16,10 @@ UsersWeedwAppDataLocalTempcdfliptest/
 
 # Runtime lock files
 .claude/scheduled_tasks.lock
+
+# Secrets - never commit (added 2026-08-18)
+.env
+.env.*
+!.env.example
+*.pem
+*.key

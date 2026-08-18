@@ -6,8 +6,11 @@
   "extraProjectPaths": [],
   "tools": {
     "vscode": "code.cmd",
+    "cursor": "cursor.cmd",
+    "antigravity": "antigravity.cmd",
     "claude": "claude",
     "codex": "codex",
+    "gemini": "gemini",
     "windowsTerminal": "wt.exe"
   },
   "statuses": [
