@@ -2142,7 +2142,13 @@ body:has(.modal.is-open) { overflow: hidden; }
 .cardbtn-preview:hover { transform: translateZ(0); border-color: var(--border); }
 .cardbtn-preview .icon-btn,
 .cardbtn-preview .status-pill,
+.cardbtn-preview .card-path,
 .cardbtn-preview .card-path-copy { cursor: default; pointer-events: none; }
+/* ...and the path pill keeps its resting look on hover. On a real card the
+   whole pill is a copy button and brightens to say so; here there is nothing
+   to click, so offering the feedback would be a lie. */
+.cardbtn-preview .card-path:hover { color: var(--fg-4); }
+.cardbtn-preview .card-path:hover .card-path-copy { color: inherit; }
 /* The demo rows vanish with their switch. .card-row is display:flex, which
    would otherwise beat [hidden]. */
 .cardbtn-preview .card-meta[hidden],
@@ -2460,18 +2466,33 @@ body:has(.modal.is-open) { overflow: hidden; }
   gap: 8px;
   margin-top: 2px;
 }
+/* Label and description share ONE line — "Tech badges – what a project is
+   built with" reads as a single sentence, and a stack of two-line options was
+   twice the height for no extra meaning. flex-wrap is the safety net: on a
+   window too narrow to fit both, the description drops to its own line rather
+   than being clipped. */
 .settings-toggle-label {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 7px;
+}
+.settings-toggle-label .settings-help { min-width: 0; }
+/* The dash lives in CSS so the markup stays a plain label + description. */
+.settings-toggle-label .settings-help::before {
+  content: "\2013";
+  margin-right: 6px;
+  color: var(--fg-4);
 }
 .settings-toggle-title {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--fg-1);
-  line-height: 1.25;
+  line-height: 1.45;
+  white-space: nowrap;
 }
 /* When the section title + help paragraph live inside a toggle row, their
    default block margins push the switch out of vertical alignment. Reset
