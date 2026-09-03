@@ -201,29 +201,67 @@
                  exactly where they will sit on a real card. The badge rows
                  mirror the two switches in the section above, so toggling one
                  shows you the result rather than describing it. -->
-            <p class="cardbtn-slots-cap">How your cards will look</p>
-            <div class="cardbtn-preview">
-              <div class="cardbtn-preview-title">
-                <span>Untitled</span>
-                <span class="cardbtn-preview-dots" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></svg>
-                </span>
+            <p class="cardbtn-slots-cap">Your three buttons</p>
+            <!-- 1:1 preview. This is the project-card markup with the project-
+                 card classes, so it renders at exactly the scale, spacing and
+                 styling of a card in the grid — change the card and the
+                 preview follows for free. Contents are demo data; the only
+                 real difference is the action row, whose three buttons are the
+                 dashed drop slots. Icon buttons and status pills are spans,
+                 not buttons: nothing in here is clickable except the slots. -->
+            <article class="card cardbtn-preview" aria-label="Preview of a project card">
+              <header class="card-head">
+                <div class="card-title-row">
+                  <h2 class="card-title">Untitled</h2>
+                  <div class="card-title-actions" aria-hidden="true">
+                    <span class="icon-btn">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 7 2 2 4-4"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>
+                    </span>
+                    <span class="icon-btn">
+                      <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                    </span>
+                    <span class="icon-btn">
+                      <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></svg>
+                    </span>
+                  </div>
+                </div>
+                <div class="card-meta" id="set-preview-tech">
+                  <span class="stack-badge" data-stack="Next.js">Next.js</span>
+                  <span class="indicators">
+                    <span class="ind" data-kind="git">Git</span>
+                    <span class="ind" data-kind="vercel">Vercel</span>
+                  </span>
+                </div>
+              </header>
+
+              <div class="card-row">
+                <span class="label">Status</span>
+                <div class="status-picker">
+                  <span class="status-pill" aria-selected="true" data-color="warning">In Progress</span>
+                  <span class="status-pill">On Hold</span>
+                  <span class="status-pill">Done</span>
+                </div>
               </div>
-              <div class="cardbtn-preview-meta" id="set-preview-tech">
-                <span class="stack-badge" data-stack="Next.js">Next.js</span>
-                <span class="indicators">
-                  <span class="ind" data-kind="git">Git</span>
-                  <span class="ind" data-kind="vercel">Vercel</span>
-                </span>
+
+              <div class="card-path-row">
+                <div class="card-path">
+                  <span class="card-path-text">C:\Projects\Untitled</span>
+                  <span class="card-path-copy" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                  </span>
+                </div>
               </div>
-              <div class="cardbtn-preview-langs" id="set-preview-langs">
-                <span class="lang-badge" style="background: var(--tile-blue-bg); color: var(--tile-blue-fg);">TypeScript 62%</span>
-                <span class="lang-badge" style="background: var(--tile-yellow-bg); color: var(--tile-yellow-fg);">CSS 24%</span>
-                <span class="lang-badge" style="background: var(--tile-slate-bg); color: var(--tile-slate-fg);">HTML 14%</span>
+
+              <div class="card-row card-row-langs" id="set-preview-langs">
+                <div class="languages">
+                  <span class="lang-badge" style="background: rgba(49,120,198,0.15); border-color: rgba(49,120,198,0.55); color: #3178c6;"><span class="lang-badge-name">TypeScript</span><span class="lang-badge-pct">62%</span></span>
+                  <span class="lang-badge" style="background: rgba(86,61,124,0.15); border-color: rgba(86,61,124,0.55); color: #a78bfa;"><span class="lang-badge-name">CSS</span><span class="lang-badge-pct">24%</span></span>
+                  <span class="lang-badge" style="background: rgba(227,79,38,0.15); border-color: rgba(227,79,38,0.55); color: #e34f26;"><span class="lang-badge-name">HTML</span><span class="lang-badge-pct">14%</span></span>
+                </div>
               </div>
-              <div class="cardbtn-preview-path">C:\Projects\Untitled</div>
-              <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
-            </div>
+
+              <footer class="card-actions cardbtn-slots" id="set-cardbtn-slots"></footer>
+            </article>
           </section>
         </div>
 

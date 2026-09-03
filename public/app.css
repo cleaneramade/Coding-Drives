@@ -1712,12 +1712,12 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-body {
   overflow-y: auto;
   flex: 0 0 auto;
-  height: min(660px, calc(100vh - 204px));
+  height: min(760px, calc(100vh - 196px));
 }
 /* Settings sits closer to the window edge than other dialogs — it is the one
    with five tabs to fit at a single height, and the Cards tab now carries a
    card preview. Scoped so no other modal grows. */
-#modal-settings .modal-card { max-height: calc(100vh - 40px); }
+#modal-settings .modal-card { max-height: calc(100vh - 32px); }
 
 /* ── Settings tabs ─────────────────────────────────────────────────────────
    A left-to-right strip under the dialog title. Each tab owns the full width
@@ -2121,51 +2121,36 @@ body:has(.modal.is-open) { overflow: hidden; }
   background: var(--brand-500); color: #fff; border-color: var(--brand-500);
 }
 
-/* ── Preview card ────────────────────────────────────────────────────────
-   A real project card in miniature, with demo contents. The three dashed drop
-   slots ARE its action row, sitting exactly where the buttons sit on a real
-   card — so you are not dragging into three abstract boxes and then imagining
-   the result, you are dragging into the result. The badge rows above follow
-   the two switches in the section overhead. */
+/* ── Preview card ───────────────────────────────────────────────
+   The preview carries the real .card classes and the real card markup, so it
+   is 1:1 with a card in the grid by construction — nothing here restates a
+   size or a spacing, and restyling a card restyles the preview. All this block
+   does is make it inert: no hover lift, no pointer, nothing focusable, since
+   the only live thing inside it is the three drop slots.
+
+   The three dashed slots ARE its action row, sitting exactly where the buttons
+   sit on a real card — so you drag into the result, not into a diagram. The
+   badge rows follow the two switches in the section above. */
 .cardbtn-slots-cap {
   margin: 12px 0 7px;
   font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--fg-4);
 }
-.cardbtn-preview {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 12px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow), var(--shadow-inset);
-}
-.cardbtn-preview-title {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  font-family: var(--font-display);
-  font-weight: 700; font-size: 15px; line-height: 1.2;
-  letter-spacing: var(--tracking-tight);
-  color: var(--fg-1);
-}
-.cardbtn-preview-dots { display: inline-flex; color: var(--fg-4); }
-.cardbtn-preview-dots svg { display: block; }
-.cardbtn-preview-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.cardbtn-preview-langs { display: flex; gap: 4px; min-width: 0; overflow: hidden; }
-.cardbtn-preview-path {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-4);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* The demo rows vanish with their switch — [hidden] alone loses to the
-   display:flex above it. */
-.cardbtn-preview-meta[hidden],
-.cardbtn-preview-langs[hidden] { display: none; }
+.cardbtn-preview { cursor: default; }
+.cardbtn-preview:hover { transform: translateZ(0); border-color: var(--border); }
+.cardbtn-preview .icon-btn,
+.cardbtn-preview .status-pill,
+.cardbtn-preview .card-path-copy { cursor: default; pointer-events: none; }
+/* The demo rows vanish with their switch. .card-row is display:flex, which
+   would otherwise beat [hidden]. */
+.cardbtn-preview .card-meta[hidden],
+.cardbtn-preview .card-row[hidden] { display: none; }
 
 /* ── Slots ───────────────────────────────────────────────────────────────
    The preview card's action row. Dashed, because each one is a place a tool
    goes; the pill inside is the button that will be there. */
-.cardbtn-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 1px; }
+/* Grid comes from .card-actions on the same element; .cardbtn-slots is kept
+   purely as the hook the drag states hang off. */
 .cardbtn-slot {
   position: relative;
   display: grid;
@@ -2221,13 +2206,15 @@ body:has(.modal.is-open) { overflow: hidden; }
 .cardbtn-slot[data-over="true"] .cardbtn-slot-num {
   background: var(--brand-500); color: #fff; border-color: var(--brand-500);
 }
-/* Inside a slot the pill IS the card's action button, so it borrows that
-   button's register: the card's own surface, its padding, its radius. */
+/* Inside a slot the pill IS the card's action button, so it takes that
+   button's exact metrics: .btn's radius, .card-actions .btn's padding, and the
+   12px label .card-actions .vendor-label sets. */
 .cardbtn-slot .cardbtn-pill {
+  gap: 8px;
   padding: 9px 10px;
   background: var(--surface-2);
   border-color: var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   cursor: grab;
 }
 .cardbtn-slot .cardbtn-pill-name { font-size: 12px; }

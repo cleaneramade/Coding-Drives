@@ -3760,6 +3760,8 @@ function renderCardPreviewBadges() {
   const tech = document.getElementById("set-preview-tech");
   const langs = document.getElementById("set-preview-langs");
   if (!tech || !langs || !settingsState) return;
+  // The rows live on real .card-meta / .card-row elements now, so hide the
+  // whole row the way a card does rather than an inner wrapper.
   tech.hidden = !settingsState.showStackBadge;
   langs.hidden = !settingsState.showLanguageBadges;
 }
