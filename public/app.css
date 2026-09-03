@@ -1754,7 +1754,6 @@ body:has(.modal.is-open) { overflow: hidden; }
    empty space waiting for a neighbour that lives in another tab. */
 .settings-panel .settings-section > * { width: 100%; }
 .settings-panel .cardbtn-slots,
-.settings-panel .cardbtn-tabs,
 .settings-panel .cardbtn-grid { margin-left: 0; margin-right: 0; }
 @keyframes modal-in {
   from { transform: translateY(8px); opacity: 0; }
@@ -2030,49 +2029,160 @@ body:has(.modal.is-open) { overflow: hidden; }
 .gh-vis-segment[data-active="codex"]   .gh-vis-thumb {
   transform: translateX(100%);
 }
-/* Card-buttons editor tab (IDEs | AI agents) — second value slides the thumb. */
-.gh-vis-segment[data-active="ai"] .gh-vis-thumb { transform: translateX(100%); }
-/* The card-buttons editor needs the full modal width, so its row stacks:
-   label block on top, slots/tab/tiles underneath. */
+/* Stacked settings row: label block on top, control underneath. */
 .settings-row-stack { flex-direction: column; align-items: stretch; gap: 10px; }
 .settings-row-stack .gh-vis-segment { display: grid; }
 
-/* ── Card-buttons editor (Settings) ──────────────────────────────────────
-   Three slot cards (the card's buttons as they'll appear — active one is
-   violet-ringed), the category tab, and a tile grid that assigns the
-   clicked tool into the armed slot. Tiles reuse .gh-cli-card so the picker
-   reads like the publish modal's CLI chooser. */
-.cardbtn-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.cardbtn-slot {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  min-width: 0;
-  padding: 9px 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--border); border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+/* ── Card-buttons board (Settings) ───────────────────────────────────────
+   A drag-and-drop board in two halves.
+
+   TOP — three dashed SLOTS, one per action button on a project card. The
+   dashed edge is the whole affordance: it reads as "something goes in here"
+   without a word of instruction. A slot is never empty (a card always has
+   three buttons), so the dash frames the pill sitting in it rather than an
+   empty hole.
+
+   BOTTOM — the SHELF: every tool as a rounded-square pill, logo + name. A
+   pill already placed is dimmed and badged with its slot number, so the shelf
+   doubles as a map of what sits where.
+
+   Drag a shelf pill into a slot, or drag one slot's pill onto another to swap
+   them. Tap-to-place is the fallback: the armed slot is the violet one, and a
+   tap on any shelf pill fills it. */
+.cardbtn-slots {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
 }
-.cardbtn-slot:hover { border-color: var(--ring); }
+.cardbtn-slot {
+  display: grid;
+  justify-items: center; align-content: start;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px 8px 11px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--ring);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease-out),
+              background var(--dur) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out);
+}
+.cardbtn-slot:hover { border-color: rgba(255, 255, 255, 0.30); }
+/* Armed slot — the target for a tap on a shelf pill. */
 .cardbtn-slot[data-active="true"] {
   border-color: var(--brand-500);
   background: var(--tile-violet-bg);
-  box-shadow: 0 0 0 1px var(--brand-500) inset;
+}
+/* Live drop target. Solid brand edge + halo, so mid-drag there is never a
+   question about where the pill will land. */
+.cardbtn-slot[data-over="true"] {
+  border-style: solid;
+  border-color: var(--brand-500);
+  background: var(--tile-violet-bg);
+  box-shadow: 0 0 0 3px rgba(106, 77, 255, 0.22);
+}
+.cardbtn-slot:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: 2px; }
+/* While a drag is in flight the other slots brighten their dashes, so all
+   three read as "droppable" at a glance. */
+.cardbtn-slots[data-dragging="true"] .cardbtn-slot { border-color: var(--ring-brand); }
+/* ...and the armed slot drops its violet fill for the duration, so mid-drag
+   exactly one slot is filled: the one under the pointer. */
+.cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-active="true"]:not([data-over="true"]) {
+  background: rgba(255, 255, 255, 0.02);
+}
+.cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-active="true"]:not([data-over="true"]) .cardbtn-slot-num {
+  color: var(--fg-4);
 }
 .cardbtn-slot-num {
-  font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--fg-3);
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--fg-4);
+  transition: color var(--dur) var(--ease-out);
 }
-.cardbtn-slot-mark { color: var(--fg-1); }
-.cardbtn-slot-mark svg { display: block; width: 16px; height: 16px; }
-.cardbtn-slot-name {
-  max-width: 100%;
-  font-size: 11.5px; font-weight: 600; color: var(--fg-1); text-align: center;
+.cardbtn-slot[data-active="true"] .cardbtn-slot-num,
+.cardbtn-slot[data-over="true"] .cardbtn-slot-num { color: var(--tile-violet-fg); }
+
+/* ── The pill ────────────────────────────────────────────────────────────
+   One component, two homes: inside a slot and on the shelf. What you drag is
+   exactly what lands. Rounded square, not a lozenge — a full pill radius on a
+   two-line-tall chip reads as a tag, and these are objects you move. */
+.cardbtn-pill {
+  position: relative;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 0; width: 100%;
+  padding: 8px 10px;
+  background: var(--surface-2); color: var(--fg-1);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600;
+  cursor: grab;
+  transition: border-color var(--dur) var(--ease-out),
+              background var(--dur) var(--ease-out),
+              opacity var(--dur) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cardbtn-pill:active { cursor: grabbing; }
+.cardbtn-pill-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; color: #fff;
+}
+.cardbtn-pill-mark svg { display: block; width: 15px; height: 15px; }
+.cardbtn-pill-name {
+  min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* App|CLI mini-switch inside a Claude/Codex slot. */
+/* The slot's own pill sits on a solid ground so it reads as "placed" against
+   the dashed frame around it. */
+.cardbtn-slot .cardbtn-pill {
+  background: var(--surface-solid);
+  border-color: rgba(255, 255, 255, 0.10);
+}
+
+/* ── Shelf ───────────────────────────────────────────────────────────────
+   Two rows of three. Every tool, no tabs — six pills fit without paging, and
+   a category tab was one more thing to understand for no gain. */
+.cardbtn-shelf-cap {
+  margin: 14px 0 8px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--fg-4);
+}
+.cardbtn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cardbtn-shelf-pill:hover { transform: translateY(-1px); border-color: var(--ring); background: var(--surface-3); }
+.cardbtn-shelf-pill:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: 2px; }
+/* Placed elsewhere: dimmed, because it is a copy of something already on the
+   board rather than a fresh choice. */
+.cardbtn-shelf-pill[data-state="used"] { opacity: 0.55; }
+.cardbtn-shelf-pill[data-state="used"]:hover { opacity: 1; }
+/* Placed in the armed slot: brand hairline, nothing more. The armed slot is
+   already violet — a second violet fill down here would make the eye read the
+   same highlight twice. */
+.cardbtn-shelf-pill[data-state="here"] {
+  border-color: var(--brand-500);
+  background: var(--surface-3);
+}
+/* Slot number badge — which button this tool currently fills. */
+.cardbtn-pill-badge {
+  position: absolute; top: -6px; right: -6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px;
+  font-size: 9.5px; font-weight: 700; line-height: 1;
+  background: #3a3a46; color: #f4f4f5;
+  border: 1px solid var(--border);
+}
+.cardbtn-shelf-pill[data-state="here"] .cardbtn-pill-badge {
+  background: var(--brand-500); color: #fff; border-color: var(--brand-500);
+}
+
+/* ── App | CLI row ───────────────────────────────────────────────────────
+   Both variants claim the same height so the three slots stay level: a live
+   switch where the tool has an App|CLI choice, a read-only caption where it
+   doesn't. */
+.cardbtn-mode,
+.cardbtn-mode-fixed {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 22px;
+}
 .cardbtn-mode {
-  display: inline-flex; gap: 2px;
-  background: var(--surface); border: 1px solid var(--border);
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.22); border: 1px solid var(--border);
   border-radius: 999px; padding: 2px;
 }
 .cardbtn-mode button {
@@ -2081,20 +2191,21 @@ body:has(.modal.is-open) { overflow: hidden; }
   font: inherit; font-size: 10.5px; font-weight: 600; color: var(--fg-3);
   transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
-.cardbtn-mode button[data-on="true"] {
-  background: var(--tile-violet-bg);
-  box-shadow: 0 0 0 1px var(--brand-500) inset;
-  color: var(--fg-1);
+.cardbtn-mode button:hover { color: var(--fg-1); }
+.cardbtn-mode button[data-on="true"] { background: var(--brand-500); color: #fff; }
+.cardbtn-mode-fixed {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--fg-4);
 }
-.cardbtn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-/* Compact spin on .gh-cli-card for the 3-across tool tiles. */
-.cardbtn-tile { padding: 9px 10px; gap: 8px; min-width: 0; }
-.cardbtn-tile .gh-cli-title {
-  font-size: 12px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.cardbtn-tile-icon { flex-shrink: 0; }
-.cardbtn-tile-icon svg { display: block; width: 15px; height: 15px; }
+
+/* Per-vendor optical sizing — each brand path fills its viewBox differently,
+   so a flat 15px would render Claude small and Codex heavy. Mirrors the same
+   normalisation applied to .vendor-btn on the cards. */
+.cardbtn-pill-mark.vendor-claude svg { width: 17px; height: 17px; }
+.cardbtn-pill-mark.vendor-codex svg,
+.cardbtn-pill-mark.vendor-antigravity svg,
+.cardbtn-pill-mark.vendor-gemini svg { width: 16px; height: 16px; }
+
 .gh-vis-opt {
   position: relative;
   z-index: 1;
@@ -2115,9 +2226,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 .gh-vis-segment[data-active="overwrite"] .gh-vis-opt[data-value="overwrite"],
 .gh-vis-segment[data-active="release"]   .gh-vis-opt[data-value="release"],
 .gh-vis-segment[data-active="claude"]    .gh-vis-opt[data-value="claude"],
-.gh-vis-segment[data-active="codex"]     .gh-vis-opt[data-value="codex"],
-.gh-vis-segment[data-active="ide"]       .gh-vis-opt[data-value="ide"],
-.gh-vis-segment[data-active="ai"]        .gh-vis-opt[data-value="ai"] {
+.gh-vis-segment[data-active="codex"]     .gh-vis-opt[data-value="codex"] {
   color: var(--fg-1);
 }
 /* ── Add Project modal ──────────────────────────────────────────────────── */

@@ -185,20 +185,18 @@
             </div>
           </section>
 
-          <!-- Card-buttons builder. Three slots mirror the three action
-               buttons on every card; click a slot, then pick its tool from
-               the tabbed tile grid below (IDEs vs AI agents). Claude/Codex
-               slots grow an App|CLI mini-switch. Rendering happens in
-               renderCardButtonsEditor() (app.js). -->
+          <!-- Card-buttons builder — drag and drop. Three dashed slots mirror
+               the three action buttons on every card; the pill grid below is
+               the tool shelf. Drag a pill into a slot, or drag one slot's pill
+               onto another to swap them. Tap-to-place is kept as a fallback:
+               tap a slot to arm it, then tap a pill. Claude/Codex slots carry
+               an App|CLI mini-switch. Rendered by renderCardButtonsEditor()
+               in app.js — both containers are filled from script. -->
           <section class="settings-section">
             <h3 class="settings-title">Card buttons</h3>
-            <p class="settings-help">Pick a slot, then choose what lives there. Claude and Codex can open as an app or a terminal.</p>
+            <p class="settings-help">Drag a tool into a slot. Or tap a slot, then tap a tool. Claude and Codex can open as an app or a terminal.</p>
             <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
-            <div class="gh-vis-segment cardbtn-tabs" id="set-cardbtn-tabs" data-active="ide" role="tablist" aria-label="Tool category">
-              <span class="gh-vis-thumb" aria-hidden="true"></span>
-              <button type="button" class="gh-vis-opt" data-value="ide" aria-pressed="true">IDEs</button>
-              <button type="button" class="gh-vis-opt" data-value="ai" aria-pressed="false">AI agents</button>
-            </div>
+            <p class="cardbtn-shelf-cap">Tools</p>
             <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
           </section>
         </div>

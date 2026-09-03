@@ -77,14 +77,17 @@ let openTaskEditorOnCreate = true;
 // The full roster of tools a card action button can be. `group` drives the
 // Settings editor's tabs (IDEs vs AI agents); `modes: true` marks tools that
 // can open EITHER their desktop app or a terminal CLI (Claude, Codex) — that
-// choice lives on the slot as mode: "app" | "cli". Cards are repainted from
-// this map on every rebuild, so the template's baked-in buttons are just
-// skeletons.
+// choice lives on the slot as mode: "app" | "cli". Tools WITHOUT that choice
+// carry `fixedMode` instead — a read-only "App" / "CLI" caption so every slot
+// card in the Settings editor has the same four rows and lines up. Cards are
+// repainted from this map on every rebuild, so the template's baked-in buttons
+// are just skeletons.
 const VENDOR_TOOLS = {
   vscode: {
     label: "VS Code",
     cls: "vendor-vscode",
     group: "ide",
+    fixedMode: "App",
     // Official VS Code wedge (Microsoft).
     svg: '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4608 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4609 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0415L12.1872 25.0096C10.589 23.7965 8.35363 23.8959 6.86933 25.2461L1.36303 30.2549C-0.452552 31.9064 -0.454633 34.7627 1.35853 36.417L16.2471 50.0001L1.35853 63.5832C-0.454633 65.2374 -0.452552 68.0938 1.36303 69.7453L6.86933 74.7541C8.35363 76.1043 10.589 76.2037 12.1872 74.9905L29.3551 61.9587L68.769 97.9167C69.3925 98.5406 70.1246 99.0104 70.8511 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z"/></svg>',
   },
@@ -92,6 +95,7 @@ const VENDOR_TOOLS = {
     label: "Cursor",
     cls: "vendor-cursor",
     group: "ide",
+    fixedMode: "App",
     // Official Cursor mark (Anysphere) — via simple-icons.
     svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>',
   },
@@ -99,6 +103,7 @@ const VENDOR_TOOLS = {
     label: "Antigravity",
     cls: "vendor-antigravity",
     group: "ide",
+    fixedMode: "App",
     // Official Google Antigravity mark — via lobehub's brand-icon set
     // (matches svgl's copy of the same logo).
     svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"/></svg>',
@@ -123,6 +128,7 @@ const VENDOR_TOOLS = {
     label: "Gemini",
     cls: "vendor-gemini",
     group: "ai",
+    fixedMode: "CLI",
     // Official Google Gemini spark — via simple-icons.
     svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg>',
   },
@@ -3481,9 +3487,9 @@ function openSettings() {
       // can trust every slot.
       cardButtons: sanitizeCardButtons(cfg.cardButtons),
     };
-    // Card-buttons editor starts armed on slot 1, tab matching its tool.
+    // Card-buttons board opens with slot 1 armed, so a tap on a tool pill
+    // has somewhere to go before any slot has been touched.
     cardBtnActiveSlot = 0;
-    cardBtnActiveTab = VENDOR_TOOLS[settingsState.cardButtons[0].tool].group;
     renderSettings();
     setSettingsTab("cards");
     settingsError("");
@@ -3619,46 +3625,117 @@ document.getElementById("set-task-agent")?.addEventListener("click", (e) => {
   setTaskAgentSegment(opt.dataset.value);
 });
 // ── Card-buttons editor (Settings → "Card buttons") ───────────────────────
-// Three slot chips + a category tab + a tile grid. Click a slot to arm it,
-// click a tile to put that tool in the armed slot. Picking a tool that
-// already lives in another slot swaps the two entries (modes and all), so
-// the three buttons stay distinct without any error states. Claude/Codex
-// slots grow an App|CLI mini-switch for what their button opens.
+// A drag-and-drop board. Three dashed SLOTS on top are the card's three
+// action buttons; the PILL SHELF below is every tool that can go in one.
+//
+//   • Drag a shelf pill onto a slot to put it there.
+//   • Drag one slot's pill onto another slot to swap the two buttons.
+//   • A tool can only live in one slot, so dropping a tool that is already
+//     placed swaps the two slots rather than duplicating the button.
+//
+// Dragging is fiddly for some people, so every drag has a tap equivalent:
+// tap a slot to arm it (it turns violet), then tap a shelf pill. Keyboard
+// gets the same path — slots and pills are focusable and respond to
+// Enter / Space.
+//
+// Claude and Codex can open either their desktop app or a terminal, so their
+// slot carries a live App|CLI switch. Every other tool prints a read-only
+// caption in that same row, which keeps all three slots exactly level.
 let cardBtnActiveSlot = 0;
-let cardBtnActiveTab = "ide";
+// What is being dragged right now: { kind: "tool", tool } from the shelf, or
+// { kind: "slot", index } from a slot. Kept in a module variable because the
+// HTML5 dataTransfer payload is unreadable during dragover (protected mode),
+// and the slot needs to know what is coming to highlight correctly.
+let cardBtnDragging = null;
+
+// Put `tool` into slot `i`. If the tool already lives in another slot the two
+// entries trade places (modes and all) so no tool is ever duplicated and no
+// slot is ever emptied.
+function cardBtnPlaceTool(i, tool) {
+  const list = settingsState.cardButtons;
+  if (!VENDOR_TOOLS[tool] || list[i].tool === tool) return false;
+  const other = list.findIndex((s) => s.tool === tool);
+  const incoming = other !== -1
+    ? list[other]
+    : (VENDOR_TOOLS[tool].modes ? { tool, mode: "cli" } : { tool });
+  if (other !== -1) list[other] = list[i];
+  list[i] = incoming;
+  return true;
+}
+
+// Swap two slots outright — used when a slot's own pill is dragged onto
+// another slot.
+function cardBtnSwapSlots(a, b) {
+  const list = settingsState.cardButtons;
+  if (a === b || !list[a] || !list[b]) return false;
+  const tmp = list[a];
+  list[a] = list[b];
+  list[b] = tmp;
+  return true;
+}
+
+// The logo + name pill. The same component fills a slot and sits on the
+// shelf, so what you drag is exactly what lands.
+function cardBtnPill(tool, { draggable }) {
+  const v = VENDOR_TOOLS[tool];
+  const pill = document.createElement("div");
+  pill.className = "cardbtn-pill";
+  pill.dataset.tool = tool;
+
+  const mark = document.createElement("span");
+  mark.className = `cardbtn-pill-mark ${v.cls}`;
+  mark.innerHTML = v.svg;
+
+  const name = document.createElement("span");
+  name.className = "cardbtn-pill-name";
+  name.textContent = v.label;
+  name.title = v.label;
+
+  pill.append(mark, name);
+  if (draggable) pill.draggable = true;
+  return pill;
+}
 
 function renderCardButtonsEditor() {
   const slotsHost = document.getElementById("set-cardbtn-slots");
-  const grid = document.getElementById("set-cardbtn-grid");
-  if (!slotsHost || !grid || !settingsState) return;
+  const shelf = document.getElementById("set-cardbtn-grid");
+  if (!slotsHost || !shelf || !settingsState) return;
   const list = settingsState.cardButtons;
 
-  // Slot chips — divs, not <button>s, because the App|CLI mini-switch nests
-  // real buttons inside and buttons can't contain buttons.
+  // ── Slots ───────────────────────────────────────────────────────────────
   slotsHost.innerHTML = "";
   list.forEach((slot, i) => {
     const v = VENDOR_TOOLS[slot.tool];
+    // A div, not a <button>: the App|CLI switch nests real buttons inside and
+    // a button can't contain a button.
     const el = document.createElement("div");
     el.className = "cardbtn-slot";
     el.dataset.active = String(i === cardBtnActiveSlot);
+    el.dataset.slot = String(i);
     el.setAttribute("role", "button");
     el.tabIndex = 0;
-    el.setAttribute("aria-label", `Button ${i + 1}: ${v.label}. Click to choose a different tool.`);
+    el.setAttribute("aria-label", `Button ${i + 1}: ${v.label}. Drop a tool here, or tap to choose one.`);
 
     const num = document.createElement("span");
     num.className = "cardbtn-slot-num";
     num.textContent = `Button ${i + 1}`;
 
-    const mark = document.createElement("span");
-    mark.className = "cardbtn-slot-mark";
-    mark.innerHTML = v.svg;
+    const pill = cardBtnPill(slot.tool, { draggable: true });
+    pill.addEventListener("dragstart", (e) => {
+      cardBtnDragging = { kind: "slot", index: i };
+      slotsHost.dataset.dragging = "true";
+      shelf.dataset.dragging = "true";
+      try {
+        e.dataTransfer.setData("text/plain", `slot:${i}`);
+        e.dataTransfer.effectAllowed = "move";
+      } catch { /* older engines — the module variable is the real payload */ }
+    });
 
-    const name = document.createElement("span");
-    name.className = "cardbtn-slot-name";
-    name.textContent = v.label;
+    el.append(num, pill);
 
-    el.append(num, mark, name);
-
+    // Row 3 always exists so the three slots stay exactly the same height:
+    // a live switch where the tool has an App|CLI choice, a muted caption
+    // where it doesn't.
     if (v.modes) {
       const sw = document.createElement("span");
       sw.className = "cardbtn-mode";
@@ -3677,11 +3754,44 @@ function renderCardButtonsEditor() {
         sw.appendChild(opt);
       }
       el.appendChild(sw);
+    } else {
+      const fixed = document.createElement("span");
+      fixed.className = "cardbtn-mode-fixed";
+      fixed.textContent = v.fixedMode || "App";
+      fixed.title = `${v.label} always opens as ${v.fixedMode === "CLI" ? "a terminal" : "an app"}`;
+      el.appendChild(fixed);
     }
 
+    // Drop target. dragover must preventDefault or the browser refuses the
+    // drop; dragleave is guarded with contains() so moving over the pill
+    // inside the slot doesn't flicker the highlight off.
+    el.addEventListener("dragover", (e) => {
+      if (!cardBtnDragging) return;
+      const self = cardBtnDragging.kind === "slot" && cardBtnDragging.index === i;
+      const same = cardBtnDragging.kind === "tool" && list[i].tool === cardBtnDragging.tool;
+      if (self || same) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      el.dataset.over = "true";
+    });
+    el.addEventListener("dragleave", (e) => {
+      if (!el.contains(e.relatedTarget)) delete el.dataset.over;
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      delete el.dataset.over;
+      const d = cardBtnDragging;
+      cardBtnDragging = null;
+      if (!d) return;
+      const changed = d.kind === "slot" ? cardBtnSwapSlots(d.index, i) : cardBtnPlaceTool(i, d.tool);
+      cardBtnActiveSlot = i;
+      if (changed) renderCardButtonsEditor();
+      else { delete slotsHost.dataset.dragging; delete shelf.dataset.dragging; }
+    });
+
+    // Tap / keyboard fallback: arm this slot, then tap a shelf pill.
     const arm = () => {
       cardBtnActiveSlot = i;
-      cardBtnActiveTab = VENDOR_TOOLS[list[i].tool].group;
       renderCardButtonsEditor();
     };
     el.addEventListener("click", arm);
@@ -3691,49 +3801,67 @@ function renderCardButtonsEditor() {
     slotsHost.appendChild(el);
   });
 
-  // Category tab (IDEs | AI agents)
-  const tabs = document.getElementById("set-cardbtn-tabs");
-  tabs.dataset.active = cardBtnActiveTab;
-  tabs.querySelectorAll(".gh-vis-opt").forEach((b) =>
-    b.setAttribute("aria-pressed", String(b.dataset.value === cardBtnActiveTab))
-  );
-
-  // Tool tiles for the active tab
-  grid.innerHTML = "";
+  // ── Tool shelf ──────────────────────────────────────────────────────────
+  // Every tool in one grid. A pill already sitting in a slot is dimmed and
+  // badged with that slot's number, so the shelf doubles as a map of what is
+  // placed where — and a drag from a badged pill reads as a move, not a copy.
+  shelf.innerHTML = "";
   for (const [key, v] of Object.entries(VENDOR_TOOLS)) {
-    if (v.group !== cardBtnActiveTab) continue;
-    const tile = document.createElement("button");
-    tile.type = "button";
-    tile.className = "gh-cli-card cardbtn-tile";
-    tile.setAttribute("aria-checked", String(list[cardBtnActiveSlot].tool === key));
-    const icon = document.createElement("span");
-    icon.className = "gh-cli-icon cardbtn-tile-icon";
-    icon.innerHTML = v.svg;
-    const title = document.createElement("span");
-    title.className = "gh-cli-title";
-    title.textContent = v.label;
-    tile.append(icon, title);
-    tile.addEventListener("click", () => {
-      const cur = list[cardBtnActiveSlot];
-      if (cur.tool === key) return;
-      // If another slot already holds this tool, swap the two entries so a
-      // pick never produces duplicate buttons.
-      const other = list.findIndex((s) => s.tool === key);
-      const incoming = other !== -1
-        ? list[other]
-        : (VENDOR_TOOLS[key].modes ? { tool: key, mode: "cli" } : { tool: key });
-      if (other !== -1) list[other] = cur;
-      list[cardBtnActiveSlot] = incoming;
-      renderCardButtonsEditor();
+    const usedIn = list.findIndex((s) => s.tool === key);
+    const isArmed = usedIn === cardBtnActiveSlot;
+    const pill = cardBtnPill(key, { draggable: true });
+    pill.classList.add("cardbtn-shelf-pill");
+    pill.dataset.state = isArmed ? "here" : usedIn !== -1 ? "used" : "free";
+    pill.tabIndex = 0;
+    pill.setAttribute("role", "button");
+    pill.setAttribute(
+      "aria-label",
+      isArmed
+        ? `${v.label} is already in Button ${cardBtnActiveSlot + 1}`
+        : usedIn !== -1
+          ? `Put ${v.label} in Button ${cardBtnActiveSlot + 1}. It swaps places with Button ${usedIn + 1}.`
+          : `Put ${v.label} in Button ${cardBtnActiveSlot + 1}`
+    );
+    pill.title = pill.getAttribute("aria-label");
+
+    if (usedIn !== -1) {
+      const badge = document.createElement("span");
+      badge.className = "cardbtn-pill-badge";
+      badge.textContent = String(usedIn + 1);
+      badge.setAttribute("aria-hidden", "true");
+      pill.appendChild(badge);
+    }
+
+    pill.addEventListener("dragstart", (e) => {
+      cardBtnDragging = { kind: "tool", tool: key };
+      document.getElementById("set-cardbtn-slots").dataset.dragging = "true";
+      shelf.dataset.dragging = "true";
+      try {
+        e.dataTransfer.setData("text/plain", `tool:${key}`);
+        e.dataTransfer.effectAllowed = "move";
+      } catch { /* older engines — the module variable is the real payload */ }
     });
-    grid.appendChild(tile);
+
+    const place = () => {
+      if (cardBtnPlaceTool(cardBtnActiveSlot, key)) renderCardButtonsEditor();
+    };
+    pill.addEventListener("click", place);
+    pill.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); place(); }
+    });
+    shelf.appendChild(pill);
   }
 }
-document.getElementById("set-cardbtn-tabs")?.addEventListener("click", (e) => {
-  const opt = e.target.closest(".gh-vis-opt");
-  if (!opt) return;
-  cardBtnActiveTab = opt.dataset.value === "ai" ? "ai" : "ide";
-  renderCardButtonsEditor();
+
+// One global dragend clears the board state, including a drag that was
+// abandoned outside any slot (no drop event fires in that case).
+document.addEventListener("dragend", () => {
+  if (!cardBtnDragging) return;
+  cardBtnDragging = null;
+  const slots = document.getElementById("set-cardbtn-slots");
+  const shelf = document.getElementById("set-cardbtn-grid");
+  if (slots) { delete slots.dataset.dragging; slots.querySelectorAll("[data-over]").forEach((n) => delete n.dataset.over); }
+  if (shelf) delete shelf.dataset.dragging;
 });
 
 // Display form for a scan-folder pill: drop the leading "<drive>:\Users\<name>\"
