@@ -1719,7 +1719,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   flex: 0 0 auto;
   /* No footer any more, so the body claims that height: the cap allows for
      the header, the tab strip and the 32px the card keeps off the viewport. */
-  height: min(760px, calc(100vh - 130px));
+  height: min(760px, calc(100vh - 150px));
 }
 
 /* ── Settings header actions ─────────────────────────────────────────────
@@ -1780,8 +1780,8 @@ body:has(.modal.is-open) { overflow: hidden; }
      rule under it cut the header off from the body and made the tabs read as
      a fixed piece of chrome; inset and rounded, the group reads as one thing
      you can move between, and the panel below simply follows it. */
-  margin: 2px 20px 8px;
-  padding: 3px;
+  margin: 7px 20px 14px;
+  padding: 4px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -1794,7 +1794,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   position: relative;
   z-index: 1;
   padding: 6px 8px;
-  font: inherit; font-size: 12px; font-weight: 600;
+  font: inherit; font-size: 12.5px; font-weight: 600;
   letter-spacing: var(--tracking-snug);
   color: var(--fg-3);
   background: transparent;
@@ -1817,6 +1817,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   border-radius: 999px;
   background: var(--tile-violet-bg);
   border: 1px solid var(--brand-500);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
   pointer-events: none;
   transition: transform var(--dur) var(--ease-out), width var(--dur) var(--ease-out);
@@ -1824,7 +1825,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 
 
 /* One panel at a time; sections inside it stack full-width. */
-.settings-panel { display: flex; flex-direction: column; gap: 14px; }
+.settings-panel { display: flex; flex-direction: column; gap: 12px; }
 .settings-panel[hidden] { display: none; }
 /* Every control in a section spans the panel, so nothing is centred against
    empty space waiting for a neighbour that lives in another tab. */
@@ -1839,6 +1840,10 @@ body:has(.modal.is-open) { overflow: hidden; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 18px 20px 8px;
 }
+/* The settings header gives the floating tab strip below it real clearance —
+   at 8px the strip read as part of the header rather than a control sitting
+   between the header and the panel. */
+#modal-settings .modal-head { padding-bottom: 13px; }
 .modal-head h2 {
   font-family: var(--font-display);
   font-weight: 700;
@@ -2196,7 +2201,7 @@ body:has(.modal.is-open) { overflow: hidden; }
    sit on a real card — so you drag into the result, not into a diagram. The
    badge rows follow the two switches in the section above. */
 .cardbtn-slots-cap {
-  margin: 8px 0 6px;
+  margin: 6px 0 5px;
   font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--fg-4);
 }
@@ -2466,7 +2471,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 
 /* ── Settings sections ───────────────────────────────────────────────────── */
 .settings-section {
-  padding: 14px 0 16px;
+  padding: 12px 0 14px;
   border-bottom: 1px solid var(--border-soft);
 }
 /* No trailing rule and no trailing padding at the foot of a panel — the
@@ -2485,7 +2490,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   margin: 0 0 6px;
 }
 .settings-help {
-  margin: 0 0 9px;
+  margin: 0 0 7px;
   color: var(--fg-3);
   font-size: 12px;
   line-height: 1.55;
@@ -2501,7 +2506,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
@@ -2525,7 +2530,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-toggle-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   margin-top: 2px;
 }
 /* Label and description share ONE line — "Tech badges – what a project is
