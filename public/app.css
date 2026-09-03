@@ -577,6 +577,34 @@ body {
    read as "live". It's a button: clicking it opens the running session
    terminals so the user can watch them. Hidden (display:none via [hidden])
    while the project is idle. */
+/* ── Pinned flag ───────────────────────────────────────────────────────────
+   Shown in the card's title-action cluster only while the project is pinned
+   to the top of the grid. Same 28px square footprint as the icon buttons it
+   sits beside, tinted brand violet so "pinned" reads at a glance. */
+.card-pin-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--brand-300);
+  background: rgba(106, 77, 255, 0.18);
+  border: 1px solid var(--ring-brand);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: filter var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+}
+.card-pin-badge[hidden] { display: none; }
+.card-pin-badge:hover { filter: brightness(1.15); }
+.card-pin-badge:active { transform: translateY(1px); }
+.card-pin-badge:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: 2px; }
+
+/* A pinned card gets a faint violet edge so the pinned block is legible as a
+   group even when the badge itself is off-screen in a scrolled grid. */
+.card[data-pinned="true"] { border-color: var(--ring-brand); }
+
 .card-session-badge {
   display: inline-flex;
   align-items: center;
@@ -964,8 +992,16 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
 .card-actions .vendor-label { font-size: 12px; }
 
 /* ── Card tasks ───────────────────────────────────────────────────────────── */
-.card-tasks { display: flex; flex-direction: column; gap: 6px; }
-.card-tasks-head { display: flex; align-items: center; gap: 8px; }
+/* The task block is its own region of the card, not another meta row — give
+   it real separation from the language chips above it and a hairline rule so
+   the eye reads "here begin the to-dos". */
+.card-tasks {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+.card-tasks-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .task-count {
   font-size: 10px; font-weight: 700;
   padding: 1px 7px;
@@ -981,14 +1017,21 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   margin-left: auto;
   display: inline-flex; align-items: center; gap: 8px;
 }
+/* Send all / Add task / N done all share one envelope: 28px tall, the same
+   height as a status pill, so the head row reads as a proper control strip
+   instead of three cramped little chips. */
+.task-send-all, .task-add-btn, .task-more {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 11.5px;
+}
 .task-send-all {
-  display: inline-flex; align-items: center; gap: 5px;
-  font: inherit; font-size: 11px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 11.5px; font-weight: 600;
   color: var(--brand-300);
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--ring-brand);
   border-radius: var(--radius-pill);
-  padding: 3px 9px;
   cursor: pointer;
   transition: background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
 }
@@ -997,6 +1040,41 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
 .task-list {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-direction: column; gap: 4px;
+}
+/* Collapsed with more to-dos than fit: the LIST scrolls rather than the card
+   growing, so every open task is reachable for a quick reference without
+   expanding the whole history. ~5 rows tall; scrollbars are hidden app-wide,
+   and the mask fades the last row so there's a visible "more below" cue. */
+.task-list-scroll {
+  max-height: 224px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%);
+          mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%);
+}
+/* Divider between the to-do list and the completed history in the expanded
+   view — the two are different things and shouldn't read as one list. */
+.task-group-sep {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px 2px 2px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--fg-4);
+}
+.task-group-sep::after {
+  content: ""; flex: 1 1 auto; height: 1px;
+  background: var(--border);
+}
+.task-group-count {
+  order: 1;
+  font-size: 10px; font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--fg-3);
+  letter-spacing: 0;
 }
 .task-item {
   display: flex; align-items: center; gap: 8px;
@@ -1097,9 +1175,34 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
 /* Card drag affordance — open hand on empty card areas. */
 .card { cursor: grab; }
 
-/* Card being dragged — the browser ghost follows the cursor; the in-grid
-   original dims while the others FLIP around it. */
-.card.card-dragging { opacity: 0.5; }
+/* Card being dragged — lifted out of the flow into a fixed-position floater
+   that tracks the cursor. It gets a real elevation so it reads as picked up,
+   the way an app icon does on a phone home screen. */
+.card.card-dragging {
+  cursor: grabbing;
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--ring-brand);
+  border-color: var(--ring-brand);
+  will-change: transform;
+  /* NO transform transition while airborne — the floater is repositioned on
+     every pointermove and a transition here would make it lag the cursor.
+     endCardDrag sets an inline transform transition for the fly-home only. */
+  transition: box-shadow var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
+}
+/* While a card is in the air, nothing else should look clickable and text
+   must not select under the cursor. */
+body.is-card-dragging { cursor: grabbing; user-select: none; }
+body.is-card-dragging .card:not(.card-dragging) { cursor: grabbing; }
+body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
+
+/* The hole the dragged card leaves behind. Dashed brand outline so the drop
+   slot is unmistakable while the rest of the grid pushes around it. */
+.card-placeholder {
+  border: 1.5px dashed var(--ring-brand);
+  border-radius: var(--radius-xl);
+  background: rgba(106, 77, 255, 0.05);
+  flex: 0 0 auto;
+  pointer-events: none;
+}
 
 /* Lives in .task-head-actions, last in the right-aligned cluster (so it sits
    to the RIGHT of the Add task button). Pill toggle in the same idiom as
@@ -1112,7 +1215,6 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  padding: 3px 9px;
   cursor: pointer;
   transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
 }
@@ -1137,7 +1239,6 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   background: transparent;
   border: 1px dashed var(--border);
   border-radius: var(--radius-pill);
-  padding: 3px 9px;
   cursor: pointer;
   transition: color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
 }
@@ -1177,17 +1278,115 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
   align-self: flex-start;
   font-size: 12px;
 }
+/* Empty state is a real drop zone, not a lone small button: a dashed panel
+   you can drag a file onto, with Browse for the file picker. */
+.task-image-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px;
+  padding: 20px 16px;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--fg-4);
+  text-align: center;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.task-image-drop[hidden] { display: none; }
+.task-image-drop:hover { border-color: var(--ring); color: var(--fg-3); }
+.task-image-drop-text { font-size: 12px; font-weight: 600; color: var(--fg-3); }
+.task-image-drop .task-image-attach { align-self: center; }
+/* Live drag feedback — the whole dialog accepts the drop, the panel lights up. */
+.task-image-drop.is-drop-target,
+.modal-card.is-drop-target .task-image-drop {
+  border-color: var(--brand-500);
+  background: rgba(106, 77, 255, 0.10);
+  color: var(--brand-300);
+}
+.modal-card.is-drop-target { box-shadow: inset 0 0 0 1.5px var(--ring-brand); }
+
 .task-image-preview {
   display: flex; align-items: flex-start; gap: 12px;
 }
 .task-image-preview[hidden] { display: none; }
+/* The thumbnail is a button — click it for a full-size look. */
+.task-image-thumb-btn {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+  line-height: 0;
+}
+.task-image-thumb-btn:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: 2px; }
+.task-image-zoom-hint {
+  position: absolute;
+  right: 5px; bottom: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: var(--radius-pill);
+  background: rgba(0,0,0,0.62);
+  color: #fff;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-out);
+}
+.task-image-thumb-btn:hover .task-image-zoom-hint,
+.task-image-thumb-btn:focus-visible .task-image-zoom-hint { opacity: 1; }
+.task-image-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 #task-image-thumb {
   width: 96px; height: 96px;
   object-fit: cover;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-2);
+  transition: border-color var(--dur) var(--ease-out);
 }
+.task-image-thumb-btn:hover #task-image-thumb { border-color: var(--ring-brand); }
+
+/* ── Image lightbox ───────────────────────────────────────────────────────
+   Full-size preview, above every modal. */
+.lightbox {
+  position: fixed; inset: 0;
+  z-index: 200;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px;
+  padding: 48px;
+  background: rgba(8, 8, 12, 0.88);
+  backdrop-filter: blur(8px);
+  animation: lightbox-in 160ms var(--ease-out);
+}
+@keyframes lightbox-in { from { opacity: 0; } to { opacity: 1; } }
+.lightbox img {
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,0.8);
+}
+.lightbox-caption {
+  font-size: 12px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  word-break: break-all;
+  text-align: center;
+  max-width: 70ch;
+}
+.lightbox-close {
+  position: absolute;
+  top: 20px; right: 24px;
+  width: 34px; height: 34px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--fg-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.lightbox-close:hover { color: var(--fg-1); background: var(--surface-3); }
 .task-image-meta {
   display: flex; flex-direction: column; gap: 8px;
   min-width: 0;

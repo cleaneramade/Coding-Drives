@@ -214,6 +214,16 @@
             </div>
             <div class="settings-toggle-row">
               <div class="settings-toggle-label">
+                <span class="settings-toggle-title">Open editor for new tasks</span>
+                <p class="settings-help">Naming a task opens its editor so you can add a description, links and an image right away.</p>
+              </div>
+              <span class="switch">
+                <input type="checkbox" id="set-open-task-editor" aria-label="Open editor for new tasks" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </span>
+            </div>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-label">
                 <span class="settings-toggle-title">Send tasks with</span>
                 <p class="settings-help">Which coding agent the task send buttons launch.</p>
               </div>
@@ -457,6 +467,11 @@
                  opposite side from the project name. Clicking it opens the
                  running session terminals so the user can watch them. Hidden
                  while idle. Populated per-card in buildCard() (app.js). -->
+            <!-- Pinned flag. Shown only while the project is pinned to the
+                 top of the grid; clicking it unpins. Populated in buildCard. -->
+            <button class="card-pin-badge" type="button" hidden aria-label="Pinned to top — click to unpin" title="Pinned to top — click to unpin">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+            </button>
             <button class="card-session-badge" type="button" hidden>
               <span class="session-dot" aria-hidden="true"></span>
               <span class="card-session-text"></span>
@@ -681,10 +696,10 @@
              removable chip. Keeps the field short and lets the user stack up
              several links. Pasting multiple URLs at once adds each. -->
         <div class="gh-field">
-          <span class="gh-field-label">Reference links <span class="gh-field-hint">(optional — paste a URL and Add; multiple allowed)</span></span>
+          <span class="gh-field-label">Reference links <span class="gh-field-hint">(a web link or a file/folder path on this PC)</span></span>
           <div class="path-list reflink-list" id="task-edit-links-list"></div>
           <div class="modal-input-row">
-            <input id="task-edit-links-input" type="text" placeholder="https://example.com/design-spec" autocomplete="off" spellcheck="false" />
+            <input id="task-edit-links-input" type="text" placeholder="https://example.com/spec   or   C:\Users\you\notes\spec.md" autocomplete="off" spellcheck="false" />
             <button class="btn btn-brand" id="task-edit-links-add" type="button">Add</button>
           </div>
         </div>
@@ -693,19 +708,28 @@
              file uploads it immediately, OR paste an image with Ctrl+V anywhere
              in this dialog; the preview + Remove appear once set. -->
         <div class="gh-field task-edit-image-field">
-          <span class="gh-field-label">Reference image <span class="gh-field-hint">(attach a file or paste an image with Ctrl+V)</span></span>
+          <span class="gh-field-label">Reference image <span class="gh-field-hint">(drop a file here, browse, or paste with Ctrl+V)</span></span>
           <input id="task-edit-image-input" type="file" accept="image/*" hidden />
-          <div class="task-image-empty" id="task-image-empty">
+          <div class="task-image-empty task-image-drop" id="task-image-empty">
+            <svg class="task-image-drop-mark" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+            <span class="task-image-drop-text">Drop an image here</span>
             <button class="btn btn-ghost task-image-attach" id="task-image-attach" type="button">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-              <span>Attach image</span>
+              <span>Browse files</span>
             </button>
           </div>
           <div class="task-image-preview" id="task-image-preview" hidden>
-            <img id="task-image-thumb" alt="Reference image preview" />
+            <button class="task-image-thumb-btn" id="task-image-zoom" type="button" aria-label="Preview image full size" title="Click to preview">
+              <img id="task-image-thumb" alt="Reference image preview" />
+              <span class="task-image-zoom-hint" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M11 8v6M8 11h6"/></svg>
+              </span>
+            </button>
             <div class="task-image-meta">
               <span class="task-image-name" id="task-image-name"></span>
-              <button class="btn btn-ghost task-image-remove" id="task-image-remove" type="button">Remove</button>
+              <div class="task-image-actions">
+                <button class="btn btn-ghost task-image-replace" id="task-image-replace" type="button">Replace</button>
+                <button class="btn btn-ghost task-image-remove" id="task-image-remove" type="button">Remove</button>
+              </div>
             </div>
           </div>
         </div>
@@ -777,10 +801,10 @@
           </label>
 
           <div class="gh-field">
-            <span class="gh-field-label">Reference links <span class="gh-field-hint">(optional — paste a URL and Add; multiple allowed)</span></span>
+            <span class="gh-field-label">Reference links <span class="gh-field-hint">(a web link or a file/folder path on this PC)</span></span>
             <div class="path-list reflink-list" id="sched-links-list"></div>
             <div class="modal-input-row">
-              <input id="sched-links-input" type="text" placeholder="https://example.com/spec" autocomplete="off" spellcheck="false" />
+              <input id="sched-links-input" type="text" placeholder="https://example.com/spec   or   C:\Users\you\notes\spec.md" autocomplete="off" spellcheck="false" />
               <button class="btn btn-brand" id="sched-links-add" type="button">Add</button>
             </div>
           </div>
@@ -868,6 +892,15 @@
        Order: routine project actions first (Backup / Archive / Copy path),
        a visual divider, then the heavier "publishes to the world" action. -->
   <template id="card-menu-template">
+    <!-- Label + description flip between "Pin to top" and "Unpin" based on
+         the project's pinned flag — set in populateCardMenu (app.js). -->
+    <button class="popover-item" data-action="pin" role="menuitem" type="button">
+      <span class="menu-item-head">
+        <svg class="pin-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+        <span class="pin-label">Pin to top</span>
+      </span>
+      <span class="menu-item-desc pin-desc">Keep this card first in the grid</span>
+    </button>
     <button class="popover-item" data-action="backup" role="menuitem" type="button">
       <span class="menu-item-head">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
@@ -901,6 +934,16 @@
       <span class="menu-item-desc publish-desc">Push to a new GitHub repo</span>
     </button>
   </template>
+
+  <!-- Full-size preview for any attached reference image. Sits above every
+       modal so it works from inside the task editor. -->
+  <div class="lightbox" id="image-lightbox" hidden role="dialog" aria-modal="true" aria-label="Image preview">
+    <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Close preview">
+      <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+    </button>
+    <img id="lightbox-img" alt="" />
+    <span class="lightbox-caption" id="lightbox-caption"></span>
+  </div>
 
   <script src="/app.js" type="module"></script>
 </body>

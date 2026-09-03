@@ -1110,6 +1110,9 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
       // flows target the right repo — for every already-published project.
       githubUrl: p.githubUrl || db[p.slug]?.githubPrep?.repoUrl || null,
       status,
+      // Pin-to-top (card menu → Pin). Pinned projects sort above everything
+      // else on every filter page, regardless of the saved drag order.
+      pinned: db[p.slug]?.pinned === true,
       notes: db[p.slug]?.notes || "",
       tasks: Array.isArray(db[p.slug]?.tasks) ? db[p.slug].tasks : [],
       lastBackedUpAt: db[p.slug]?.lastBackedUpAt || db[p.slug]?.lastDuplicatedAt || null,
@@ -1180,6 +1183,10 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
     // Which AI CLI the per-task send buttons launch (Settings → Preferences).
     // Surfaced here so the frontend can label its send toasts correctly.
     taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
+    // After naming a new task on a card, open the full task editor so the
+    // description / links / reference image can be added in the same breath.
+    // Defaults ON — it's the flow the app shipped with originally.
+    openTaskEditorOnCreate: cfg.openTaskEditorOnCreate !== false,
     // The three card action buttons (Settings → "Card buttons"): each slot
     // is { tool, mode? } — the frontend paints the buttons from this and
     // passes the slot's mode back when opening, so Claude/Codex buttons know
@@ -1334,6 +1341,7 @@ app.post("/api/projects/:slug", async (req, res) => {
     update = { ...existing, updatedAt: new Date().toISOString() };
     if (typeof req.body.status === "string") update.status = req.body.status;
     if (typeof req.body.notes  === "string") update.notes  = req.body.notes;
+    if (typeof req.body.pinned === "boolean") update.pinned = req.body.pinned;
     db[slug] = update;
   });
   res.json({ ok: true, entry: update });
@@ -1383,6 +1391,15 @@ function flattenTaskText(s, max) {
 // Reference links — accept an array (one URL each) or a newline string. Keep
 // only http/https URLs, flatten each to a single line, dedupe, cap the count.
 // Anything that doesn't parse as an absolute http(s) URL is dropped.
+// A "reference link" is either a web address or a real path on this PC.
+// Local paths matter as much as URLs here — a spec, a screenshot folder, a
+// log file — and the agent that picks the task up can read either. Paths used
+// to be dropped silently, which read as "my link disappeared".
+function isLocalRefPath(s) {
+  return /^[a-zA-Z]:[\\/]/.test(s)   // C:\… or C:/…
+      || /^\\\\[^\\]/.test(s)        // \\server\share
+      || s.startsWith("/");          // POSIX absolute
+}
 function sanitizeTaskLinks(input) {
   const raw = Array.isArray(input)
     ? input
@@ -1391,11 +1408,22 @@ function sanitizeTaskLinks(input) {
   for (const item of raw) {
     const s = flattenTaskText(item, 500);
     if (!s) continue;
-    try {
-      const u = new URL(s);
-      if (u.protocol !== "http:" && u.protocol !== "https:") continue;
-      if (!out.includes(u.href)) out.push(u.href);
-    } catch { /* not a valid URL — skip */ }
+    if (isLocalRefPath(s)) {
+      if (!out.includes(s)) out.push(s);
+    } else {
+      try {
+        const u = new URL(s);
+        if (u.protocol === "file:") {
+          // file:///C:/x/y → C:\x\y, so what the agent gets is a path it can
+          // hand straight to a shell.
+          const decoded = decodeURIComponent(u.pathname.replace(/^\/(?=[a-zA-Z]:)/, ""));
+          const native = decoded.replace(/\//g, "\\");
+          if (native && !out.includes(native)) out.push(native);
+        } else if (u.protocol === "http:" || u.protocol === "https:") {
+          if (!out.includes(u.href)) out.push(u.href);
+        }
+      } catch { /* neither a path nor a valid URL — skip */ }
+    }
     if (out.length >= 20) break;
   }
   return out;
@@ -1827,6 +1855,73 @@ app.post(
     }
   }
 );
+
+// Attach an image the user names instead of uploading: either a LOCAL FILE
+// PATH ("C:\shots\bug.png", with or without surrounding quotes — Windows'
+// "Copy as path" wraps them) or an http(s) URL, which is downloaded. Both end
+// up as the same on-disk file the upload route writes, so everything
+// downstream (the preview, the agent prompt) is identical.
+app.post("/api/projects/:slug/tasks/:taskId/image/source", asyncRoute(async (req, res) => {
+  const { slug, taskId } = req.params;
+  if (!fs.existsSync(fromSlug(slug))) return res.status(404).json({ error: "folder not found" });
+  let src = String(req.body?.source || "").trim().replace(/^["']|["']$/g, "");
+  if (!src) return res.status(400).json({ error: "Paste an image URL or a file path first." });
+
+  let buf, origName, contentType = "";
+  if (/^https?:\/\//i.test(src)) {
+    let r;
+    try {
+      r = await fetch(src, { redirect: "follow" });
+    } catch (err) {
+      return res.status(400).json({ error: `Couldn't reach that URL — ${err.message}` });
+    }
+    if (!r.ok) return res.status(400).json({ error: `That URL returned HTTP ${r.status}.` });
+    contentType = r.headers.get("content-type") || "";
+    const len = Number(r.headers.get("content-length") || 0);
+    if (len > 25 * 1024 * 1024) return res.status(400).json({ error: "That image is over 25 MB." });
+    buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 25 * 1024 * 1024) return res.status(400).json({ error: "That image is over 25 MB." });
+    try {
+      origName = decodeURIComponent(new URL(src).pathname.split("/").filter(Boolean).pop() || "image");
+    } catch { origName = "image"; }
+  } else {
+    if (!fs.existsSync(src)) return res.status(400).json({ error: "No file at that path." });
+    let st;
+    try { st = fs.statSync(src); } catch { return res.status(400).json({ error: "Couldn't read that path." }); }
+    if (!st.isFile()) return res.status(400).json({ error: "That path is a folder, not an image file." });
+    if (st.size > 25 * 1024 * 1024) return res.status(400).json({ error: "That image is over 25 MB." });
+    buf = fs.readFileSync(src);
+    origName = path.basename(src);
+  }
+
+  const ext = pickImageExt(origName, contentType);
+  if (!ext) {
+    return res.status(400).json({
+      error: "That isn't an image we recognise (PNG, JPG, GIF, WEBP, BMP or SVG).",
+    });
+  }
+
+  fs.mkdirSync(TASK_IMAGES_DIR, { recursive: true });
+  removeTaskImageFiles(taskId);
+  const file = path.join(TASK_IMAGES_DIR, `${taskId}${ext}`);
+  fs.writeFileSync(file, buf);
+
+  const now = new Date().toISOString();
+  let updated = null;
+  await updateDB((db) => {
+    const t = (db[slug]?.tasks || []).find((t) => t.id === taskId);
+    if (!t) return;
+    t.image = { name: flattenTaskText(origName, 200) || "image", file };
+    t.updatedAt = now;
+    db[slug].updatedAt = now;
+    updated = { ...t };
+  });
+  if (!updated) {
+    removeTaskImageFiles(taskId);
+    return res.status(404).json({ error: "task not found" });
+  }
+  res.json({ ok: true, task: updated });
+}));
 
 // Serve a task's reference image back to the renderer for the editor preview.
 app.get("/api/projects/:slug/tasks/:taskId/image", async (req, res) => {

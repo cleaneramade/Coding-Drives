@@ -70,6 +70,9 @@ let showLanguageBadges = true;
 // Settings → Preferences → "Send tasks with". Which AI CLI the per-task send
 // buttons launch ("claude" | "codex"). Round-trips via /api/projects.
 let taskAgent = "claude";
+// Settings → "Open editor for new tasks". When on, naming a task on a card
+// opens the full editor so a description / links / image can be added at once.
+let openTaskEditorOnCreate = true;
 // ── Card buttons (Settings → "Card buttons") ──────────────────────────────
 // The full roster of tools a card action button can be. `group` drives the
 // Settings editor's tabs (IDEs vs AI agents); `modes: true` marks tools that
@@ -314,6 +317,7 @@ async function loadProjects() {
   // treated as enabled so existing installs keep their current behaviour.
   showLanguageBadges = data.showLanguageBadges !== false;
   taskAgent = data.taskAgent === "codex" ? "codex" : "claude";
+  openTaskEditorOnCreate = data.openTaskEditorOnCreate !== false;
   cardButtons = sanitizeCardButtons(data.cardButtons);
   projectOrders = data.projectOrders || {};
   // Mirror to body attributes so CSS can globally suppress any rogue
@@ -429,7 +433,16 @@ function renderChips() {
 }
 
 // ── Render: card grid ─────────────────────────────────────────────────────
+// A poll / focus refresh landing mid-drag used to rebuild every card, which
+// detached the element under the cursor and silently killed the drag. Defer
+// the rebuild until the card is dropped instead.
+let pendingGridRender = false;
 function renderGrid() {
+  // A press that is about to become a drag counts too: an 8s poll landing in
+  // the 260ms between mouse-down and the drag arming used to swap the card
+  // node out from under the cursor, and the drag then died silently.
+  if (cardDrag || cardPress) { pendingGridRender = true; return; }
+
   // Close any open in-card menu BEFORE the grid is wiped (in bucketCards) —
   // otherwise the stale card node (including its menu-view listeners) is
   // detached but kept alive by closures in dispatchCardMenuAction, leaking
@@ -459,9 +472,12 @@ function renderGrid() {
   // filter's order list. Slugs not yet listed (status just flipped locally)
   // float to the top, matching the server's new-arrivals-on-top rule.
   const pos = new Map((projectOrders[activeStatus] || []).map((s, i) => [s, i]));
+  // Pinned projects always float above everything else — on every filter
+  // page — while keeping their relative drag order among themselves.
   filtered.sort((a, b) =>
-    (pos.has(a.slug) ? pos.get(a.slug) : -1) -
-    (pos.has(b.slug) ? pos.get(b.slug) : -1)
+    ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) ||
+    ((pos.has(a.slug) ? pos.get(a.slug) : -1) -
+     (pos.has(b.slug) ? pos.get(b.slug) : -1))
   );
 
   // Belt & braces for the scroll-jump fix above: snapshot the window scroll
@@ -475,12 +491,18 @@ function renderGrid() {
 }
 
 // ── Offset (masonry) layout ───────────────────────────────────────────────
-// Cards are distributed round-robin into N independent flex columns. Reading
-// order stays row-major (cards 1, 2, 3 across the top), but each column
-// stacks on its own: a card growing — tasks shown, added, expanded — only
-// pushes ITS column down, never reshuffling neighbours, and every column
-// ends at its own natural y. N mirrors the old auto-fill/minmax(360px, 1fr)
-// breakpoints so the responsive behaviour is unchanged.
+// Cards are laid out in N independent flex columns. Reading order stays
+// roughly row-major (cards 1, 2, 3 across the top) but each column stacks on
+// its own: a card growing — tasks shown, added, expanded — only pushes ITS
+// column down, never reshuffling neighbours, and every column ends at its own
+// natural y.
+//
+// Placement is HEIGHT-BALANCED, not round-robin. Round-robin handed every
+// Nth card to the same column regardless of how tall it was, so a column that
+// happened to collect the task-heavy cards ran hundreds of pixels past the
+// others — the "one long column with dead space to the right" problem. Each
+// card now goes to whichever column is currently SHORTEST (ties break left,
+// so the first row still reads 1-2-3), which keeps the bottom edge level.
 const MASONRY_MIN_COL = 360;  // px — minimum column width
 const MASONRY_GAP = 18;       // px — must match .grid / .masonry-col gap
 let masonryCols = 0;
@@ -496,9 +518,18 @@ function gridColumnCount() {
   return Math.max(1, Math.floor((w + MASONRY_GAP) / (MASONRY_MIN_COL + MASONRY_GAP)));
 }
 
+// Heights are cached on the element so a re-bucket mid-drag (which happens on
+// every insertion change) doesn't force a fresh measurement of every card.
+function cardHeightOf(el) {
+  const h = el.offsetHeight;
+  if (h > 0) el._cdHeight = h;
+  return el._cdHeight || h || 0;
+}
+
 function bucketCards(cardEls) {
   gridCardOrder = [...cardEls];
   masonryCols = gridColumnCount();
+
   grid.textContent = "";
   const cols = Array.from({ length: masonryCols }, () => {
     const col = document.createElement("div");
@@ -506,41 +537,68 @@ function bucketCards(cardEls) {
     grid.appendChild(col);
     return col;
   });
+
+  // Pass 1 — drop every card into the DOM round-robin. This exists only so
+  // the cards are laid out at their final column width and can be measured;
+  // it is never what the user ends up seeing when there is more than one
+  // column of cards.
   cardEls.forEach((el, i) => cols[i % masonryCols].appendChild(el));
+  if (masonryCols < 2 || cardEls.length <= masonryCols) return;
+
+  // Pass 2 — measure, then greedily re-home each card into whichever column
+  // is currently SHORTEST. All the reads happen before all the writes, so
+  // this costs one layout flush, not one per card.
+  const heights = cardEls.map(cardHeightOf);
+  const filled = new Array(masonryCols).fill(0);
+  cardEls.forEach((el, i) => {
+    let best = 0;
+    for (let c = 1; c < masonryCols; c++) {
+      // "Shorter by more than a hair" keeps ties on the leftmost column, so
+      // an all-equal grid still fills 1-2-3 across the first row.
+      if (filled[c] < filled[best] - 0.5) best = c;
+    }
+    // appendChild MOVES the node when it is already in another column, and
+    // because we walk cardEls in linear order every column ends up holding
+    // its own cards in reading order.
+    cols[best].appendChild(el);
+    filled[best] += heights[i] + MASONRY_GAP;
+  });
 }
 
 // Phone-home-screen push-over: FLIP-animate every card from its old spot to
-// its new one whenever the order changes mid-drag. skipEl (the card being
-// dragged) is left alone — it's gliding under the pointer on its own
-// transform and must not be animated against it.
-function rebucketWithFlip(cardEls, skipEl) {
+// its new one whenever the order changes mid-drag. Elements in `skip` (the
+// floating card, if any) are left alone.
+function rebucketWithFlip(cardEls, skip) {
+  const skipSet = skip instanceof Set ? skip : new Set(skip ? [skip] : []);
   // First rects = current VISUAL positions (in-flight transforms included),
   // so an interrupted push-over continues from exactly where it is.
   const first = new Map(cardEls.map((c) => [c, c.getBoundingClientRect()]));
   bucketCards(cardEls);
-  // Settle every non-dragged card to its raw layout slot before measuring
+  // Settle every non-skipped card to its raw layout slot before measuring
   // destinations — leftover mid-animation transforms would otherwise pollute
   // the destination rects and make cards visibly jump / overshoot.
   for (const c of cardEls) {
-    if (c === skipEl) continue;
+    if (skipSet.has(c)) continue;
     c.style.transition = "none";
     c.style.transform = "";
   }
   void grid.offsetWidth; // one reflow: clean layout to measure against
   const moving = [];
   for (const c of cardEls) {
-    if (c === skipEl) continue;
+    if (skipSet.has(c)) continue;
     const f = first.get(c);
     const l = c.getBoundingClientRect();
     const dx = f.left - l.left;
     const dy = f.top - l.top;
-    if (!dx && !dy) continue;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
     c.style.transform = `translate(${dx}px, ${dy}px)`;
     moving.push(c);
   }
   void grid.offsetWidth; // one reflow: commit all start positions
+  const flipMs = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260;
   for (const c of moving) {
-    c.style.transition = "transform 200ms cubic-bezier(0.2, 0.7, 0.3, 1)";
+    if (!flipMs) { c.style.transform = ""; continue; }
+    c.style.transition = "transform 260ms cubic-bezier(0.22, 1, 0.36, 1)";
     c.style.transform = "";
     c.addEventListener("transitionend", function clear() {
       c.style.transition = "";
@@ -553,93 +611,349 @@ function rebucketWithFlip(cardEls, skipEl) {
 // existing card nodes move between columns; nothing is rebuilt, so open
 // menus / focused inputs inside cards survive width-only resizes.
 window.addEventListener("resize", () => {
+  if (cardDrag) return;                       // never reshuffle mid-drag
   if (gridColumnCount() === masonryCols) return;
   bucketCards(gridCardOrder.filter((el) => el.isConnected));
 });
 
 // ── Drag-to-rearrange project cards ───────────────────────────────────────
-// Native HTML5 drag — the browser's compositor-driven ghost follows the
-// cursor with zero JS in the loop (the smoothest feel by far); the grid
-// FLIPs around the dimmed in-place card. Drop persists the order via
-// /api/projects/reorder.
-let lastCardDragTarget = null;
-let lastCardDragMove = 0;
-let lastCardDragX = 0;
-let lastCardDragY = 0;
+// Pointer-driven, phone-home-screen style. The pressed card lifts out of the
+// flow into a fixed-position "floater" that tracks the cursor 1:1, and a
+// same-size placeholder takes its slot in the grid. Moving the cursor over
+// another card decides BEFORE or AFTER it (which half of the card the cursor
+// is in), the placeholder re-slots there, and every other card FLIPs into its
+// new home — so the layout you see mid-drag is exactly the layout you get.
+//
+// Native HTML5 drag used to do this and had three problems:
+//   * the drop target was picked by "which card index am I over" — a swap,
+//     not an insert, so crossing into another row moved things you didn't aim
+//     at;
+//   * a 120 ms anti-oscillation throttle made it feel laggy and sometimes
+//     swallowed a deliberate move;
+//   * releasing anywhere Windows considered a non-target played the slow
+//     "ghost flies home" animation.
+// None of that applies to a pointer-driven drag.
+const CARD_DRAG_THRESHOLD = 7;   // px of travel before a press becomes a drag
+const CARD_DRAG_HOLD_MS   = 260; // press-and-hold also arms the drag
+const CARD_EDGE_SCROLL    = 90;  // px band at the viewport edge that autoscrolls
 
-// While any of our drags is live, the WHOLE window is a valid drop zone.
-// Without this the cursor flashes ⊘ no-drop over the topbar/background, and
-// releasing there makes Windows play the slow "ghost flies back to origin"
-// animation — both read as glitches.
-document.addEventListener("dragover", (e) => {
-  if (!document.querySelector(".card.card-dragging, .task-item.dragging")) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-});
-document.addEventListener("drop", (e) => {
-  if (!document.querySelector(".card.card-dragging, .task-item.dragging")) return;
-  e.preventDefault();
+let cardPress = null;   // { el, project, pointerId, startX, startY, holdTimer }
+let cardDrag  = null;   // live drag state
+
+// Anything the user can click inside a card must NOT start a drag.
+const NO_DRAG_SELECTOR =
+  "button, a, input, textarea, select, label, .card-tasks, .card-menu-view, .card-path, .status-picker, [contenteditable]";
+
+grid.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || cardDrag) return;
+  const el = e.target instanceof Element ? e.target.closest(".card") : null;
+  if (!el || el.dataset.menu === "open") return;
+  if (e.target instanceof Element && e.target.closest(NO_DRAG_SELECTOR)) return;
+  const project = projects.find((p) => p.slug === el.dataset.slug);
+  if (!project) return;
+  cardPress = {
+    el, project, slug: el.dataset.slug,
+    pointerId: e.pointerId,
+    startX: e.clientX, startY: e.clientY,
+    holdTimer: setTimeout(() => {
+      if (cardPress && !cardDrag) beginCardDrag(cardPress.startX, cardPress.startY);
+    }, CARD_DRAG_HOLD_MS),
+  };
 });
 
-// No dead zones: when the pointer is over a gap / column padding instead of
-// a card, snap to the nearest card (by Y) in the column under the pointer so
-// hovering ANYWHERE on the grid still resorts.
-function nearestCardAt(x, y, exclude) {
-  let best = null;
-  let bestDist = Infinity;
-  for (const col of grid.querySelectorAll(".masonry-col")) {
-    const r = col.getBoundingClientRect();
-    if (x < r.left - MASONRY_GAP || x > r.right + MASONRY_GAP) continue;
-    for (const c of col.querySelectorAll(".card")) {
-      if (c === exclude) continue;
-      const cr = c.getBoundingClientRect();
-      const dy = y < cr.top ? cr.top - y : y > cr.bottom ? y - cr.bottom : 0;
-      if (dy < bestDist) { bestDist = dy; best = c; }
-    }
-  }
-  return best;
+function cancelCardPress() {
+  if (!cardPress) return;
+  clearTimeout(cardPress.holdTimer);
+  cardPress = null;
+  if (pendingGridRender) { pendingGridRender = false; renderGrid(); }
 }
 
-grid.addEventListener("dragover", (e) => {
-  const dragging = grid.querySelector(".card.card-dragging");
-  if (!dragging) return;            // a task row drag — its list handles it
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move"; // clean move cursor, never ⊘
-  let target = e.target instanceof Element ? e.target.closest(".card") : null;
-  if (!target) target = nearestCardAt(e.clientX, e.clientY, dragging);
-  if (!target || target === dragging) return;
-  // The same-target block exists ONLY to stop the layout oscillating under a
-  // stationary cursor right after a swap. Real pointer travel since the last
-  // swap means the user is deliberately aiming — re-arm everything so the
-  // card that just shifted can immediately be swapped with again.
-  if (lastCardDragTarget &&
-      Math.hypot(e.clientX - lastCardDragX, e.clientY - lastCardDragY) > 30) {
-    lastCardDragTarget = null;
-  }
-  // One move per hovered card + a throttle so variable-height cards can't
-  // oscillate the layout under the pointer. Gaps never re-arm lastTarget.
-  const now = performance.now();
-  if (target === lastCardDragTarget || now - lastCardDragMove < 120) return;
-  lastCardDragTarget = target;
-  lastCardDragMove = now;
-  lastCardDragX = e.clientX;
-  lastCardDragY = e.clientY;
-  const from = gridCardOrder.indexOf(dragging);
-  const to = gridCardOrder.indexOf(target);
-  if (from === -1 || to === -1 || from === to) return;
-  const next = [...gridCardOrder];
-  next.splice(from, 1);
-  next.splice(to, 0, dragging);
-  rebucketWithFlip(next);
+window.addEventListener("pointermove", (e) => {
+  if (cardDrag) { onCardDragMove(e.clientX, e.clientY); return; }
+  if (!cardPress || e.pointerId !== cardPress.pointerId) return;
+  if (Math.hypot(e.clientX - cardPress.startX, e.clientY - cardPress.startY) < CARD_DRAG_THRESHOLD) return;
+  beginCardDrag(e.clientX, e.clientY);
+  onCardDragMove(e.clientX, e.clientY);
 });
 
+window.addEventListener("pointerup", () => {
+  if (cardDrag) endCardDrag();
+  else cancelCardPress();
+});
+window.addEventListener("pointercancel", () => {
+  if (cardDrag) endCardDrag();
+  else cancelCardPress();
+});
+// Escape aborts a drag and puts the card back where it started.
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && cardDrag) endCardDrag({ cancel: true });
+});
+// Alt-tabbing (or releasing the button outside the window) never delivers a
+// pointerup, which would otherwise strand the floating card mid-air with the
+// grid stuck in drag mode. Treat losing the window as a drop where it is.
+window.addEventListener("blur", () => {
+  if (cardDrag) endCardDrag();
+  else cancelCardPress();
+});
+
+function beginCardDrag(x, y) {
+  const press = cardPress;
+  if (!press) return;
+  clearTimeout(press.holdTimer);
+  cardPress = null;
+
+  // The grid may have been rebuilt between mouse-down and here (a poll that
+  // slipped through, a status change). Re-resolve the card by slug so the
+  // drag still starts on the live node instead of dying on a detached one.
+  let el = press.el;
+  if (!el.isConnected || gridCardOrder.indexOf(el) === -1) {
+    const fresh = grid.querySelector(`.card[data-slug="${CSS.escape(press.slug)}"]`);
+    if (fresh) el = fresh;
+  }
+  const rect = el.getBoundingClientRect();
+  const index = gridCardOrder.indexOf(el);
+  if (index === -1) return;
+
+  // Placeholder holds the slot so the rest of the grid keeps a real gap to
+  // push around — exactly the hole a phone home screen leaves behind.
+  const ph = document.createElement("div");
+  ph.className = "card-placeholder";
+  ph.style.height = `${rect.height}px`;
+  ph._cdHeight = rect.height;
+
+  const order = [...gridCardOrder];
+  order[index] = ph;
+
+  // Lift the card out of the flow. Fixed positioning means grid reflows
+  // beneath it can never tug it around.
+  el.style.width = `${rect.width}px`;
+  el.style.height = `${rect.height}px`;
+  el.style.position = "fixed";
+  el.style.left = `${rect.left}px`;
+  el.style.top = `${rect.top}px`;
+  el.style.margin = "0";
+  el.style.zIndex = "60";
+  el.style.pointerEvents = "none";
+  el.classList.add("card-dragging");
+  document.body.appendChild(el);
+  document.body.classList.add("is-card-dragging");
+
+  cardDrag = {
+    el, ph,
+    project: press.project,
+    grabX: x - rect.left,
+    grabY: y - rect.top,
+    w: rect.width, h: rect.height,
+    baseLeft: rect.left, baseTop: rect.top,
+    lastX: x, lastY: y,
+    lastSlotAt: 0,
+    startOrder: [...gridCardOrder],
+    startIndex: index,
+    rafId: 0,
+    scrollRaf: 0,
+    scrollDy: 0,
+    moved: false,
+  };
+
+  rebucketWithFlip(order, el);
+  positionFloater(x, y);
+}
+
+function positionFloater(x, y) {
+  const d = cardDrag;
+  if (!d) return;
+  // Clamp so the card can never be flung fully off-screen and lost.
+  const left = Math.max(-d.w * 0.4, Math.min(window.innerWidth - d.w * 0.6, x - d.grabX));
+  const top  = Math.max(-d.h * 0.4, Math.min(window.innerHeight - 48, y - d.grabY));
+  d.el.style.transform = `translate(${left - d.baseLeft}px, ${top - d.baseTop}px) scale(1.02)`;
+}
+
+function onCardDragMove(x, y) {
+  const d = cardDrag;
+  if (!d) return;
+  d.lastX = x; d.lastY = y;
+  d.moved = true;
+  positionFloater(x, y);
+  edgeAutoScroll(y);
+  // Time-throttled rather than rAF-throttled on purpose: rAF is suspended
+  // whenever Chromium considers the window occluded, and a drag that stops
+  // re-slotting because another window is overlapping ours is exactly the
+  // kind of "it just doesn't work" the reorder used to suffer from. The
+  // expensive part (rebucketWithFlip) only runs when the slot really moves.
+  const now = performance.now();
+  if (now - d.lastSlotAt < 24) return;
+  d.lastSlotAt = now;
+  updateCardDropSlot(x, y);
+}
+
+// Auto-scroll the page while the cursor sits near the top/bottom edge, so a
+// long grid can be reordered without letting go.
+function edgeAutoScroll(y) {
+  const d = cardDrag;
+  if (!d) return;
+  const scroller = document.scrollingElement || document.documentElement;
+  let dy = 0;
+  if (y < CARD_EDGE_SCROLL) dy = -Math.ceil((CARD_EDGE_SCROLL - y) / 6);
+  else if (y > window.innerHeight - CARD_EDGE_SCROLL) dy = Math.ceil((y - (window.innerHeight - CARD_EDGE_SCROLL)) / 6);
+  d.scrollDy = dy;
+  if (!dy || d.scrollRaf) return;
+  const step = () => {
+    if (!cardDrag || !cardDrag.scrollDy) { if (cardDrag) cardDrag.scrollRaf = 0; return; }
+    scroller.scrollTop += cardDrag.scrollDy;
+    updateCardDropSlot(cardDrag.lastX, cardDrag.lastY);
+    cardDrag.scrollRaf = requestAnimationFrame(step);
+  };
+  d.scrollRaf = requestAnimationFrame(step);
+}
+
+// Where would the card land if the user let go right now?
+//
+// Rules, in order:
+//  1. Over a card → BEFORE it if the cursor is in its top half, AFTER it if
+//     in the bottom half. That's insert-not-swap, and it's what makes
+//     crossing into a different row predictable: you always aim at a seam
+//     between two cards, never at a card's index.
+//  2. Below the last card of a column (the dead space at the bottom of a
+//     short column) → after that column's last card.
+//  3. Nothing under the cursor at all (well outside the grid) → leave the
+//     slot where it is, so a wobble off the edge doesn't fling the card away.
+function updateCardDropSlot(x, y) {
+  const d = cardDrag;
+  if (!d) return;
+  const order = gridCardOrder;
+  const target = cardUnderPoint(x, y, d.ph);
+  if (!target || target.el === d.ph) return;
+
+  const r = target.el.getBoundingClientRect();
+  const after = target.forceAfter === true
+    ? true
+    : target.forceAfter === false
+      ? false
+      : y > r.top + r.height / 2;
+
+  const from = order.indexOf(d.ph);
+  let to = order.indexOf(target.el);
+  if (from === -1 || to === -1) return;
+  if (after) to += 1;
+  if (from < to) to -= 1;          // account for pulling the placeholder out
+  if (to === from) return;
+
+  const next = [...order];
+  next.splice(from, 1);
+  next.splice(to, 0, d.ph);
+  rebucketWithFlip(next, d.el);
+}
+
+// Nearest drop reference for a point. Returns { el, forceAfter } where el is
+// a card (or the placeholder) already in the grid. forceAfter === undefined
+// means "decide by which half of the card the cursor is in".
+function cardUnderPoint(x, y, ph) {
+  const cols = [...grid.querySelectorAll(".masonry-col")];
+  if (!cols.length) return null;
+
+  // Way off to the side of the whole grid — ignore, don't yank the card.
+  const gridRect = grid.getBoundingClientRect();
+  if (x < gridRect.left - 120 || x > gridRect.right + 120) return null;
+
+  // Pick the column horizontally: the one containing x, else the closest.
+  let col = null;
+  let colDist = Infinity;
+  for (const c of cols) {
+    const r = c.getBoundingClientRect();
+    const dx = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+    if (dx < colDist) { colDist = dx; col = c; }
+  }
+  if (!col) return null;
+
+  const items = [...col.children];
+  if (!items.length) {
+    // Empty column (fewer cards than columns): aim at the end of the nearest
+    // non-empty column to its left, else the start of the one to its right.
+    const idx = cols.indexOf(col);
+    for (let i = idx - 1; i >= 0; i--) {
+      const prev = cols[i].children;
+      if (prev.length) return { el: prev[prev.length - 1], forceAfter: true };
+    }
+    for (let i = idx + 1; i < cols.length; i++) {
+      const nxt = cols[i].children;
+      if (nxt.length) return { el: nxt[0], forceAfter: false };
+    }
+    return null;
+  }
+
+  const last = items[items.length - 1];
+  if (y > last.getBoundingClientRect().bottom) {
+    return last === ph ? null : { el: last, forceAfter: true };
+  }
+  const firstEl = items[0];
+  if (y < firstEl.getBoundingClientRect().top) {
+    return firstEl === ph ? null : { el: firstEl, forceAfter: false };
+  }
+
+  // Nearest item by vertical distance — and the PLACEHOLDER is a candidate
+  // like any other. That single detail is what stops the layout oscillating:
+  // once the hole sits under the cursor, the nearest item is the hole itself
+  // and nothing moves until the cursor travels onto a different card. Skipping
+  // it instead (the old behaviour) made the card below the hole the target,
+  // which pushed the hole away, which made the first card the target again —
+  // a loop that landed the card wherever the last frame happened to fall.
+  let best = null;
+  let bestDist = Infinity;
+  for (const el of items) {
+    const r = el.getBoundingClientRect();
+    const dy = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+    if (dy < bestDist) { bestDist = dy; best = el; }
+  }
+  if (!best || best === ph) return null;
+  return { el: best };
+}
+
+function endCardDrag({ cancel = false } = {}) {
+  const d = cardDrag;
+  if (!d) return;
+  cardDrag = null;
+  if (d.rafId) cancelAnimationFrame(d.rafId);
+  if (d.scrollRaf) cancelAnimationFrame(d.scrollRaf);
+  d.scrollDy = 0;
+  document.body.classList.remove("is-card-dragging");
+
+  if (cancel) {
+    const order = [...d.startOrder];
+    order[d.startIndex] = d.ph;
+    bucketCards(order);
+  }
+
+  // Fly the floater home to the placeholder's slot, then swap them.
+  const target = d.ph.getBoundingClientRect();
+  const settle = () => {
+    const final = gridCardOrder.map((el) => (el === d.ph ? d.el : el));
+    d.ph.replaceWith(d.el);
+    gridCardOrder = final;
+    d.el.classList.remove("card-dragging");
+    for (const k of ["width", "height", "position", "left", "top", "margin", "zIndex", "pointerEvents", "transition", "transform"]) {
+      d.el.style[k] = "";
+    }
+    if (!cancel) finishCardDrag();
+    if (pendingGridRender) { pendingGridRender = false; renderGrid(); }
+  };
+
+  if (!d.moved) { settle(); return; }
+  d.el.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)";
+  d.el.style.transform = `translate(${target.left - d.baseLeft}px, ${target.top - d.baseTop}px) scale(1)`;
+  let done = false;
+  const finish = () => { if (done) return; done = true; settle(); };
+  d.el.addEventListener("transitionend", finish, { once: true });
+  setTimeout(finish, 320);
+}
+
 async function finishCardDrag() {
-  lastCardDragTarget = null;
   // Persist into the ACTIVE filter's order only — every page arranges
   // independently. Visible slugs re-slot into their existing positions
   // within this page's list (search may be hiding some members).
   const orderKey = activeStatus;
-  const visibleSlugs = gridCardOrder.filter((el) => el.isConnected).map((el) => el.dataset.slug);
+  const visibleSlugs = gridCardOrder
+    .filter((el) => el.isConnected && el.dataset && el.dataset.slug)
+    .map((el) => el.dataset.slug);
   let current = projectOrders[orderKey] || [];
   // Slugs the page list doesn't know yet (status flipped locally moments
   // ago) join at the top, mirroring the server's new-arrivals rule.
@@ -658,6 +972,19 @@ async function finishCardDrag() {
     loadProjects().catch(() => {});
   }
 }
+
+// While a task row is being dragged the whole window stays a valid drop zone
+// (task rows still use native HTML5 drag). Without this the cursor flashes ⊘
+// over the topbar/background and Windows plays the "ghost flies back" bounce.
+document.addEventListener("dragover", (e) => {
+  if (!document.querySelector(".task-item.dragging")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+});
+document.addEventListener("drop", (e) => {
+  if (!document.querySelector(".task-item.dragging")) return;
+  e.preventDefault();
+});
 
 // Per-language colored badges. Same chip shape as .stack-badge but the
 // background IS the language colour (JavaScript = yellow, TypeScript = blue,
@@ -755,11 +1082,16 @@ function renderLanguages(node, p) {
 }
 
 // ── Per-project tasks ─────────────────────────────────────────────────────
-// Rendered into the card's .card-tasks section. Open tasks (anything not
-// complete) show first, capped at TASK_VISIBLE_MAX with a "+N more" expander;
-// completed tasks collapse into the expanded view so the at-a-glance state is
-// always "what's left". Expansion survives re-renders via expandedTaskCards.
-const TASK_VISIBLE_MAX = 3;
+// Rendered into the card's .card-tasks section as two clearly separate
+// things: the TO-DO list (anything not complete) and the COMPLETED history.
+//
+// Collapsed, a card shows EVERY open task — past TASK_VISIBLE_MAX rows the
+// list itself scrolls, so the card keeps a sane footprint while still letting
+// you flick through the whole to-do list for a quick reference. The expander
+// then only controls the completed history, which lands under its own
+// "Completed" divider so finished work is never mixed into the to-dos.
+// Expansion survives re-renders via expandedTaskCards.
+const TASK_VISIBLE_MAX = 5;
 const expandedTaskCards = new Set(); // slugs whose full task list is expanded
 
 // Lifecycle is mostly automatic: the only manual input is the done-toggle
@@ -786,6 +1118,9 @@ function agentLabel() { return taskAgent === "codex" ? "Codex" : "Claude Code"; 
 // grid doesn't repaint (which would steal focus from the quick-add input and
 // close open menus on unrelated cards).
 function refreshCard(slug) {
+  // Never swap a card node out from under a live drag — the floater IS a card
+  // node, and replacing it would drop the drag on the floor.
+  if (cardDrag || cardPress) { pendingGridRender = true; return null; }
   const project = projects.find((x) => x.slug === slug);
   const cardEl = grid.querySelector(`.card[data-slug="${CSS.escape(slug)}"]`);
   if (!project || !cardEl) { renderGrid(); return null; }
@@ -965,11 +1300,24 @@ function renderTasks(node, p) {
   sendAll.hidden = sendable.length < 2;
   sendAll.onclick = () => sendTasks(p, null);
 
-  // Rows — open first, completed only in the expanded view.
+  // Rows. COLLAPSED shows every open (to-do) task — the list itself scrolls
+  // once it gets long, so a card with 20 to-dos stays card-sized but you can
+  // still flick through all of them without expanding. EXPANDED adds the
+  // completed history underneath its own divider, so the to-do list is never
+  // mixed in with what's already finished.
   list.textContent = "";
-  const ordered = expanded ? [...open, ...done] : open.slice(0, TASK_VISIBLE_MAX);
-  for (const t of ordered) list.appendChild(buildTaskRow(p, t));
-  list.hidden = ordered.length === 0;
+  for (const t of open) list.appendChild(buildTaskRow(p, t));
+  if (expanded && done.length) {
+    const sep = document.createElement("li");
+    sep.className = "task-group-sep";
+    sep.setAttribute("role", "presentation");
+    sep.innerHTML = `<span>Completed</span><span class="task-group-count">${done.length}</span>`;
+    list.appendChild(sep);
+    for (const t of done) list.appendChild(buildTaskRow(p, t));
+  }
+  list.hidden = open.length === 0 && !(expanded && done.length);
+  // Only the collapsed to-do list is height-capped; expanded shows everything.
+  list.classList.toggle("task-list-scroll", !expanded && open.length > TASK_VISIBLE_MAX);
 
   // Drag-and-drop: live-move the dragged row to wherever the pointer sits;
   // the row's dragend handler persists the resulting DOM order.
@@ -988,7 +1336,7 @@ function renderTasks(node, p) {
   // collapsing would hide nothing (e.g. the only completed task was just
   // unchecked), expansion is meaningless — drop the state so "Show less"
   // doesn't linger on a fully visible list.
-  const hiddenCount = Math.max(0, open.length - TASK_VISIBLE_MAX) + done.length;
+  const hiddenCount = done.length;
   if (hiddenCount === 0) expandedTaskCards.delete(p.slug);
   if (expanded && hiddenCount > 0) {
     more.hidden = false;
@@ -999,7 +1347,7 @@ function renderTasks(node, p) {
   } else if (hiddenCount > 0) {
     more.hidden = false;
     more.classList.remove("expanded");
-    more.innerHTML = `<span>+${hiddenCount} more</span>${TASK_CHEVRON_SVG}`;
+    more.innerHTML = `<span>${hiddenCount} done</span>${TASK_CHEVRON_SVG}`;
     more.setAttribute("aria-expanded", "false");
     more.onclick = () => { expandedTaskCards.add(p.slug); refreshCard(p.slug); };
   } else {
@@ -1029,14 +1377,20 @@ function renderTasks(node, p) {
       const r = await api(`/api/projects/${p.slug}/tasks`, { method: "POST", body: { title } });
       p.tasks = [...tasks, r.task];
       const freshCard = refreshCard(p.slug);
-      // Rapid entry: keep adding mode active on the rebuilt card. The editor
-      // (description etc.) is opt-in by clicking the task afterwards.
-      const nextInput = freshCard?.querySelector(".task-add-input");
-      const nextBtn   = freshCard?.querySelector(".task-add-btn");
-      if (nextInput && nextBtn) {
-        nextBtn.hidden = true;
-        nextInput.hidden = false;
-        nextInput.focus();
+      if (openTaskEditorOnCreate) {
+        // Settings → "Open editor for new tasks": go straight into the full
+        // editor with the caret in the description, so the description,
+        // links and reference image can all be added in one pass.
+        openTaskModal(p, r.task, { focusNote: true });
+      } else {
+        // Rapid entry: keep adding mode active on the rebuilt card.
+        const nextInput = freshCard?.querySelector(".task-add-input");
+        const nextBtn   = freshCard?.querySelector(".task-add-btn");
+        if (nextInput && nextBtn) {
+          nextBtn.hidden = true;
+          nextInput.hidden = false;
+          nextInput.focus();
+        }
       }
     } catch (err) {
       addInput.disabled = false;
@@ -1204,6 +1558,20 @@ function syncTaskPolling() {
 // paths are added in Settings. Pasting several URLs at once (newline/space
 // separated) adds each. Returns { set, get } so callers can load/read the
 // working list without touching the DOM.
+// A reference is either a web address or a real path on this PC. Both are
+// useful to an agent — "here's the spec" is as often a file on disk as a URL —
+// and the server stores whichever it is verbatim.
+function isReference(v) {
+  const s = String(v || "").trim();
+  if (!s) return false;
+  if (/^https?:\/\//i.test(s)) return true;   // http(s) URL
+  if (/^file:\/\//i.test(s)) return true;     // file:// URL
+  if (/^[a-zA-Z]:[\\/]/.test(s)) return true; // C:\… or C:/…
+  if (/^\\\\/.test(s)) return true;           // \\server\share
+  if (s.startsWith("/")) return true;         // POSIX absolute
+  return false;
+}
+
 function makeLinkEditor({ listEl, inputEl, addBtn }) {
   let links = [];
   function render() {
@@ -1223,13 +1591,31 @@ function makeLinkEditor({ listEl, inputEl, addBtn }) {
     });
   }
   function add(raw) {
-    const v = (raw || "").trim();
+    const v = (raw || "").trim().replace(/^["'<]+|[">']+$/g, "");
     if (!v) return;
+    if (!isReference(v)) {
+      toast({
+        kind: "error",
+        title: "Not a link or a path",
+        sub: "Use a web address (https://\u2026) or a full path on this PC.",
+      });
+      return;
+    }
     if (!links.includes(v)) links.push(v);
     render();
   }
+  // One reference per LINE. Splitting on spaces the way this used to would
+  // shred a real Windows path (C:\Coding Projects\spec.md became three chips),
+  // so a space split is only used when every fragment on the line
+  // independently looks like a reference.
   function addMany(text) {
-    String(text || "").split(/[\s\r\n\t]+/).map((s) => s.trim()).filter(Boolean).forEach(add);
+    for (const line of String(text || "").split(/[\r\n]+/)) {
+      const t = line.trim();
+      if (!t) continue;
+      const parts = t.split(/[ \t]+/).filter(Boolean);
+      if (parts.length > 1 && parts.every(isReference)) parts.forEach(add);
+      else add(t);
+    }
   }
   if (addBtn) {
     addBtn.addEventListener("click", () => {
@@ -1360,6 +1746,49 @@ async function uploadTaskImageFile(file) {
 // Attach → open the native file picker. The chosen image is uploaded straight
 // away (the task already exists in the editor) and the preview swaps in.
 taskImageAttach?.addEventListener("click", () => taskImageInput?.click());
+document.getElementById("task-image-replace")?.addEventListener("click", () => taskImageInput?.click());
+
+// Drag-and-drop straight onto the dialog. The whole modal card is the drop
+// zone (dropping "somewhere in the dialog" is what people actually do), with
+// the empty-state box highlighting so the target is obvious. Dropping a file
+// that isn't an image says so rather than silently doing nothing.
+(() => {
+  const card = taskModal?.querySelector(".modal-card");
+  if (!card) return;
+  let depth = 0;
+  const setActive = (on) => {
+    card.classList.toggle("is-drop-target", on);
+    taskImageEmpty?.classList.toggle("is-drop-target", on);
+  };
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  card.addEventListener("dragenter", (e) => {
+    if (!editingTask || !hasFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    setActive(true);
+  });
+  card.addEventListener("dragover", (e) => {
+    if (!editingTask || !hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  card.addEventListener("dragleave", () => {
+    if (--depth <= 0) { depth = 0; setActive(false); }
+  });
+  card.addEventListener("drop", async (e) => {
+    if (!editingTask || !hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    setActive(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    if (!(file.type || "").startsWith("image/")) {
+      toast({ kind: "error", title: "Not an image", sub: `${file.name} isn't a PNG, JPG, GIF, WEBP or SVG.` });
+      return;
+    }
+    await uploadTaskImageFile(file);
+  });
+})();
 taskImageInput?.addEventListener("change", async () => {
   const file = taskImageInput.files && taskImageInput.files[0];
   taskImageInput.value = ""; // allow re-picking the same file later
@@ -1395,6 +1824,40 @@ taskImageRemove?.addEventListener("click", async () => {
     toast({ kind: "error", title: "Couldn't remove image", sub: err.message });
   }
 });
+// ── Image lightbox ────────────────────────────────────────────────────────
+// Click any attached reference image to see it full size. Escape, the close
+// button, or a click on the backdrop dismisses it.
+const lightbox     = document.getElementById("image-lightbox");
+const lightboxImg  = document.getElementById("lightbox-img");
+const lightboxCap  = document.getElementById("lightbox-caption");
+function openLightbox(src, caption = "") {
+  if (!lightbox || !src) return;
+  lightboxImg.src = src;
+  lightboxImg.alt = caption || "Reference image";
+  lightboxCap.textContent = caption || "";
+  lightboxCap.hidden = !caption;
+  lightbox.hidden = false;
+}
+function closeLightbox() {
+  if (!lightbox || lightbox.hidden) return;
+  lightbox.hidden = true;
+  lightboxImg.removeAttribute("src");
+}
+document.getElementById("lightbox-close")?.addEventListener("click", closeLightbox);
+lightbox?.addEventListener("click", (e) => { if (e.target === lightbox) closeLightbox(); });
+// Escape closes the lightbox FIRST (capture phase) so it doesn't also close
+// the task dialog underneath in the same keypress.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && lightbox && !lightbox.hidden) {
+    e.stopPropagation();
+    closeLightbox();
+  }
+}, true);
+document.getElementById("task-image-zoom")?.addEventListener("click", () => {
+  const src = taskImageThumb?.getAttribute("src");
+  if (src) openLightbox(src, taskImageName?.textContent || "");
+});
+
 function closeTaskModal() {
   taskModal.classList.remove("is-open");
   taskModal.style.display = "none";
@@ -1442,20 +1905,10 @@ function buildCard(p) {
   node.dataset.slug = p.slug;
   node.dataset.status = p.status;
 
-  // Drag-to-rearrange. Guards: task rows are draggable on their own and
-  // their drag events bubble up here — e.target tells the two apart.
-  node.draggable = true;
-  node.addEventListener("dragstart", (e) => {
-    if (e.target !== node) return;
-    node.classList.add("card-dragging");
-    e.dataTransfer.effectAllowed = "move";
-    try { e.dataTransfer.setData("text/plain", p.slug); } catch {}
-  });
-  node.addEventListener("dragend", (e) => {
-    if (e.target !== node) return;
-    node.classList.remove("card-dragging");
-    finishCardDrag();
-  });
+  // Drag-to-rearrange is pointer-driven and delegated from the grid (see
+  // beginCardDrag) — no per-card listeners and no native HTML5 drag, so task
+  // rows inside the card keep their own draggable behaviour uncontested.
+  node.draggable = false;
   node.querySelector(".card-title").textContent = p.name;
 
   // Active-session badge. A "send" launches ONE background terminal that works
@@ -1465,6 +1918,17 @@ function buildCard(p) {
   // separately (server-side liveSessions) and counts the same way: each open
   // window is one live session. The badge sums both and, when clicked, raises
   // every running terminal window. Hidden while the project has nothing running.
+  // Pinned flag — visible only while pinned; click unpins in one tap.
+  node.dataset.pinned = p.pinned ? "true" : "false";
+  const pinBadge = node.querySelector(".card-pin-badge");
+  if (pinBadge) {
+    pinBadge.hidden = !p.pinned;
+    pinBadge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setPinned(p, false);
+    });
+  }
+
   const sessionBadge = node.querySelector(".card-session-badge");
   const sessionText  = node.querySelector(".card-session-text");
   if (sessionBadge && sessionText) {
@@ -1647,6 +2111,31 @@ function buildCard(p) {
   });
 
   return node;
+}
+
+// ── Pin to top ────────────────────────────────────────────────────────────
+// Pinned projects sort above every other card on every filter page. The flag
+// lives server-side in the project DB (db[slug].pinned) so it survives a
+// rescan and a relaunch. Optimistic: flip locally, repaint, then persist.
+async function setPinned(project, pinned) {
+  const target = projects.find((p) => p.slug === project.slug) || project;
+  if (!!target.pinned === !!pinned) return;
+  target.pinned = pinned;
+  project.pinned = pinned;
+  renderGrid();
+  try {
+    await api(`/api/projects/${project.slug}`, { method: "POST", body: { pinned } });
+    toast({
+      kind: "success",
+      title: pinned ? "Pinned to top" : "Unpinned",
+      sub: pinned ? `${project.name} stays first in the grid.` : `${project.name} is back in its normal spot.`,
+    });
+  } catch (err) {
+    target.pinned = !pinned;
+    project.pinned = !pinned;
+    renderGrid();
+    toast({ kind: "error", title: "Couldn't update pin", sub: err.message });
+  }
 }
 
 // ── Status / archive ──────────────────────────────────────────────────────
@@ -2618,6 +3107,13 @@ function populateCardMenu(card, project) {
   view.querySelector('[data-action="archive"]').hidden   = project.status === "archived";
   view.querySelector('[data-action="unarchive"]').hidden = project.status !== "archived";
 
+  const pinLabel = view.querySelector('[data-action="pin"] .pin-label');
+  const pinDesc  = view.querySelector('[data-action="pin"] .pin-desc');
+  if (pinLabel) pinLabel.textContent = project.pinned ? "Unpin" : "Pin to top";
+  if (pinDesc)  pinDesc.textContent  = project.pinned
+    ? "Return to its normal spot"
+    : "Keep this card first in the grid";
+
   const isPublished = !!project.githubUrl;
   const publishLabel = view.querySelector('[data-action="publish-github"] .publish-label');
   const publishDesc  = view.querySelector('[data-action="publish-github"] .publish-desc');
@@ -2668,7 +3164,8 @@ async function dispatchCardMenuAction(action, project, card) {
   // modal/toast appears. Matches the old popover's close-then-fire flow.
   closeCardMenu(card);
 
-  if (action === "backup")              openBackupModal(project);
+  if (action === "pin")                 await setPinned(project, !project.pinned);
+  else if (action === "backup")         openBackupModal(project);
   else if (action === "publish-github") {
     // Same wizard for both flows — flips between "Publish to GitHub"
     // (initial) and "Publish New Release" (re-publish: overwrite OR new
@@ -2749,6 +3246,9 @@ function openSettings() {
       // Off by default — when on, task/publish sessions run hidden and close
       // themselves once the work is done (no lingering terminal windows).
       headlessTerminals: cfg.headlessTerminals === true,
+      // ON unless opted out — naming a new task opens its editor so the
+      // description / links / image can be added in the same breath.
+      openTaskEditorOnCreate: cfg.openTaskEditorOnCreate !== false,
       // Which AI CLI the task send buttons launch. Claude unless opted out.
       taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
       // The three card action buttons ({ tool, mode? } each). The server
@@ -2793,6 +3293,10 @@ document.getElementById("set-show-langs")?.addEventListener("change", (e) => {
 // when done (handled server-side in spawnAiPrompt's headless branch).
 document.getElementById("set-headless-terminals")?.addEventListener("change", (e) => {
   if (settingsState) settingsState.headlessTerminals = e.target.checked;
+});
+// Open the full task editor right after a card's quick-add names a task.
+document.getElementById("set-open-task-editor")?.addEventListener("change", (e) => {
+  if (settingsState) settingsState.openTaskEditorOnCreate = e.target.checked;
 });
 // Task agent segment — which CLI the per-task send buttons launch. Same
 // slide-segment pattern as the publish modal's visibility control.
@@ -2952,6 +3456,8 @@ function renderSettings() {
   // Headless background terminals toggle
   const headlessEl = document.getElementById("set-headless-terminals");
   if (headlessEl) headlessEl.checked = !!settingsState.headlessTerminals;
+  const openEditorEl = document.getElementById("set-open-task-editor");
+  if (openEditorEl) openEditorEl.checked = !!settingsState.openTaskEditorOnCreate;
   // Task agent segment
   setTaskAgentSegment(settingsState.taskAgent);
   // Card-buttons editor (slots + tabs + tiles)
@@ -3246,6 +3752,7 @@ document.getElementById("set-save").addEventListener("click", async () => {
     showStackBadge: !!settingsState.showStackBadge,
     showLanguageBadges: !!settingsState.showLanguageBadges,
     headlessTerminals: !!settingsState.headlessTerminals,
+    openTaskEditorOnCreate: !!settingsState.openTaskEditorOnCreate,
     taskAgent: settingsState.taskAgent === "codex" ? "codex" : "claude",
     cardButtons: sanitizeCardButtons(settingsState.cardButtons),
     // Legacy mirrors of the slot modes — other server paths (and any older
@@ -3751,3 +4258,13 @@ if (winApi) {
 loadProjects().catch((err) => {
   toast({ kind: "error", title: "Couldn't load projects", sub: err.message });
 });
+
+// The masonry columns are balanced from measured card heights, and on the very
+// first paint those heights are measured against fallback fonts — Inter and
+// Bricolage arrive a beat later and change every card's line box. Re-run the
+// layout once the webfonts have actually landed so the first thing the user
+// sees is the balanced grid, not the fallback-metrics approximation.
+document.fonts?.ready?.then(() => {
+  if (cardDrag || cardPress) { pendingGridRender = true; return; }
+  if (gridCardOrder.length) renderGrid();
+}).catch(() => {});

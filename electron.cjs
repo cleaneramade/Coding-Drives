@@ -25,6 +25,13 @@ if (!app.requestSingleInstanceLock()) {
 // (and can therefore use the native dialog).
 process.env.PT_ELECTRON = "1";
 
+// Opt-in DevTools protocol port, for automated UI checks during development.
+// OFF unless CD_DEBUG_PORT is set in the environment, so a normal install
+// never exposes a debugging socket.
+if (process.env.CD_DEBUG_PORT) {
+  app.commandLine.appendSwitch("remote-debugging-port", String(process.env.CD_DEBUG_PORT));
+}
+
 const ICON_PATH = path.join(ROOT, "assets", "icon.ico");
 const PRELOAD_PATH = path.join(ROOT, "preload.cjs");
 
