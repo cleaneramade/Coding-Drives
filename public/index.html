@@ -196,8 +196,34 @@
             <h3 class="settings-title">Card buttons</h3>
             <p class="settings-help">Every card has three buttons. Drag a tool onto one, or tap a button then tap a tool.</p>
             <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
-            <p class="cardbtn-slots-cap">Your three buttons</p>
-            <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
+            <!-- Live preview of a project card. Demo data, but the three
+                 action buttons at the foot of it ARE the drop slots, sitting
+                 exactly where they will sit on a real card. The badge rows
+                 mirror the two switches in the section above, so toggling one
+                 shows you the result rather than describing it. -->
+            <p class="cardbtn-slots-cap">How your cards will look</p>
+            <div class="cardbtn-preview">
+              <div class="cardbtn-preview-title">
+                <span>Untitled</span>
+                <span class="cardbtn-preview-dots" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></svg>
+                </span>
+              </div>
+              <div class="cardbtn-preview-meta" id="set-preview-tech">
+                <span class="stack-badge" data-stack="Next.js">Next.js</span>
+                <span class="indicators">
+                  <span class="ind" data-kind="git">Git</span>
+                  <span class="ind" data-kind="vercel">Vercel</span>
+                </span>
+              </div>
+              <div class="cardbtn-preview-langs" id="set-preview-langs">
+                <span class="lang-badge" style="background: var(--tile-blue-bg); color: var(--tile-blue-fg);">TypeScript 62%</span>
+                <span class="lang-badge" style="background: var(--tile-yellow-bg); color: var(--tile-yellow-fg);">CSS 24%</span>
+                <span class="lang-badge" style="background: var(--tile-slate-bg); color: var(--tile-slate-fg);">HTML 14%</span>
+              </div>
+              <div class="cardbtn-preview-path">C:\Projects\Untitled</div>
+              <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
+            </div>
           </section>
         </div>
 

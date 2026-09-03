@@ -1712,8 +1712,12 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-body {
   overflow-y: auto;
   flex: 0 0 auto;
-  height: min(620px, calc(100vh - 228px));
+  height: min(660px, calc(100vh - 204px));
 }
+/* Settings sits closer to the window edge than other dialogs — it is the one
+   with five tabs to fit at a single height, and the Cards tab now carries a
+   card preview. Scoped so no other modal grows. */
+#modal-settings .modal-card { max-height: calc(100vh - 40px); }
 
 /* ── Settings tabs ─────────────────────────────────────────────────────────
    A left-to-right strip under the dialog title. Each tab owns the full width
@@ -1753,7 +1757,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-tab:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: -2px; }
 
 /* One panel at a time; sections inside it stack full-width. */
-.settings-panel { display: flex; flex-direction: column; gap: 20px; }
+.settings-panel { display: flex; flex-direction: column; gap: 16px; }
 .settings-panel[hidden] { display: none; }
 /* Every control in a section spans the panel, so nothing is centred against
    empty space waiting for a neighbour that lives in another tab. */
@@ -2063,12 +2067,7 @@ body:has(.modal.is-open) { overflow: hidden; }
    reads as a tag, and these are objects you move. */
 .cardbtn-pill {
   position: relative;
-  /* Content is LEFT aligned, not centred. Centring each pill on its own label
-     put every logo at a different distance from its pill edge — 26px under
-     Claude, 40px under Gemini — so scanning the grid, the short labels read as
-     shoved right even though each pill is centred to the pixel. Aligning left
-     puts all eight marks in one column and the row reads as a grid. */
-  display: flex; align-items: center; justify-content: flex-start; gap: 9px;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
   min-width: 0; width: 100%;
   padding: 8px 12px;
   background: var(--surface-2); color: var(--fg-1);
@@ -2122,23 +2121,59 @@ body:has(.modal.is-open) { overflow: hidden; }
   background: var(--brand-500); color: #fff; border-color: var(--brand-500);
 }
 
-/* ── Slots ───────────────────────────────────────────────────────────────
-   Two rows now that the App|CLI switch is gone: the caption and the pill. */
+/* ── Preview card ────────────────────────────────────────────────────────
+   A real project card in miniature, with demo contents. The three dashed drop
+   slots ARE its action row, sitting exactly where the buttons sit on a real
+   card — so you are not dragging into three abstract boxes and then imagining
+   the result, you are dragging into the result. The badge rows above follow
+   the two switches in the section overhead. */
 .cardbtn-slots-cap {
-  margin: 16px 0 8px;
+  margin: 12px 0 7px;
   font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--fg-4);
 }
-.cardbtn-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cardbtn-preview {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow), var(--shadow-inset);
+}
+.cardbtn-preview-title {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 700; font-size: 15px; line-height: 1.2;
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+}
+.cardbtn-preview-dots { display: inline-flex; color: var(--fg-4); }
+.cardbtn-preview-dots svg { display: block; }
+.cardbtn-preview-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cardbtn-preview-langs { display: flex; gap: 4px; min-width: 0; overflow: hidden; }
+.cardbtn-preview-path {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-4);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The demo rows vanish with their switch — [hidden] alone loses to the
+   display:flex above it. */
+.cardbtn-preview-meta[hidden],
+.cardbtn-preview-langs[hidden] { display: none; }
+
+/* ── Slots ───────────────────────────────────────────────────────────────
+   The preview card's action row. Dashed, because each one is a place a tool
+   goes; the pill inside is the button that will be there. */
+.cardbtn-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 1px; }
 .cardbtn-slot {
+  position: relative;
   display: grid;
-  justify-items: center; align-content: start;
-  gap: 7px;
   min-width: 0;
-  padding: 10px 8px 11px;
+  padding: 4px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px dashed var(--ring);
-  border-radius: var(--radius-md);
+  border-radius: 14px;
   cursor: pointer;
   transition: border-color var(--dur) var(--ease-out),
               background var(--dur) var(--ease-out),
@@ -2170,19 +2205,32 @@ body:has(.modal.is-open) { overflow: hidden; }
 .cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-active="true"]:not([data-over="true"]) .cardbtn-slot-num {
   color: var(--fg-4);
 }
+/* Corner index. Ties the slot to the number the shelf badges onto whichever
+   tool is sitting in it, without printing a caption a real card never has. */
 .cardbtn-slot-num {
-  font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
-  text-transform: uppercase; color: var(--fg-4);
-  transition: color var(--dur) var(--ease-out);
+  position: absolute; top: -7px; left: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 15px; height: 15px; padding: 0 4px;
+  border-radius: 999px;
+  font-size: 9px; font-weight: 700; line-height: 1;
+  background: var(--surface-solid); color: var(--fg-4);
+  border: 1px solid var(--border);
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
 .cardbtn-slot[data-active="true"] .cardbtn-slot-num,
-.cardbtn-slot[data-over="true"] .cardbtn-slot-num { color: var(--tile-violet-fg); }
-/* The slot's own pill sits on a solid ground so it reads as "placed" against
-   the dashed frame around it. */
-.cardbtn-slot .cardbtn-pill {
-  background: var(--surface-solid);
-  border-color: rgba(255, 255, 255, 0.10);
+.cardbtn-slot[data-over="true"] .cardbtn-slot-num {
+  background: var(--brand-500); color: #fff; border-color: var(--brand-500);
 }
+/* Inside a slot the pill IS the card's action button, so it borrows that
+   button's register: the card's own surface, its padding, its radius. */
+.cardbtn-slot .cardbtn-pill {
+  padding: 9px 10px;
+  background: var(--surface-2);
+  border-color: var(--border);
+  border-radius: 10px;
+  cursor: grab;
+}
+.cardbtn-slot .cardbtn-pill-name { font-size: 12px; }
 
 /* Per-vendor optical sizing — each brand path fills its viewBox differently,
    so a flat 15px would render Claude small and Codex heavy. Mirrors the same
@@ -2357,7 +2405,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 
 /* ── Settings sections ───────────────────────────────────────────────────── */
 .settings-section {
-  padding: 18px 0 20px;
+  padding: 16px 0 18px;
   border-bottom: 1px solid var(--border-soft);
 }
 /* No trailing rule and no trailing padding at the foot of a panel — the

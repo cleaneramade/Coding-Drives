@@ -3564,11 +3564,15 @@ settingsModal.querySelectorAll(".modal-close, .modal-backdrop").forEach((el) =>
 // Stack-badge toggle — mutate the working copy as the user flips it.
 // Persistence happens when the user clicks Save (see the save handler).
 document.getElementById("set-show-stack")?.addEventListener("change", (e) => {
-  if (settingsState) settingsState.showStackBadge = e.target.checked;
+  if (!settingsState) return;
+  settingsState.showStackBadge = e.target.checked;
+  renderCardPreviewBadges();
 });
 // Language-badge toggle — same pattern as the stack badge above.
 document.getElementById("set-show-langs")?.addEventListener("change", (e) => {
-  if (settingsState) settingsState.showLanguageBadges = e.target.checked;
+  if (!settingsState) return;
+  settingsState.showLanguageBadges = e.target.checked;
+  renderCardPreviewBadges();
 });
 // Headless background terminals — task/publish sessions run hidden and exit
 // when done (handled server-side in spawnAiPrompt's headless branch).
@@ -3748,7 +3752,20 @@ function cardBtnPill(id) {
   return pill;
 }
 
+// The preview card's badge rows mirror the two switches in the section above
+// it. Same surface, same moment — flip "Language badges" off and the coloured
+// chips leave the preview, which is a better answer than the sentence under
+// the switch.
+function renderCardPreviewBadges() {
+  const tech = document.getElementById("set-preview-tech");
+  const langs = document.getElementById("set-preview-langs");
+  if (!tech || !langs || !settingsState) return;
+  tech.hidden = !settingsState.showStackBadge;
+  langs.hidden = !settingsState.showLanguageBadges;
+}
+
 function renderCardButtonsEditor() {
+  renderCardPreviewBadges();
   const slotsHost = document.getElementById("set-cardbtn-slots");
   const shelf = document.getElementById("set-cardbtn-grid");
   if (!slotsHost || !shelf || !settingsState) return;
@@ -3818,9 +3835,13 @@ function renderCardButtonsEditor() {
     el.tabIndex = 0;
     el.setAttribute("aria-label", `Button ${i + 1}: ${label}. Drop a tool here, or tap to choose one.`);
 
+    // Small corner index rather than a "Button 1" caption: a real card has no
+    // label above its action row, and the digit still ties the slot to the
+    // badge the shelf puts on whichever tool is sitting in it.
     const num = document.createElement("span");
     num.className = "cardbtn-slot-num";
-    num.textContent = `Button ${i + 1}`;
+    num.textContent = String(i + 1);
+    num.setAttribute("aria-hidden", "true");
 
     const pill = cardBtnPill(id);
     pill.addEventListener("dragstart", (e) => {
