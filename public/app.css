@@ -2710,40 +2710,56 @@ body:has(.modal.is-open) { overflow: hidden; }
   display: flex; flex-direction: column; gap: 6px;
   margin-bottom: 10px;
 }
+/* One line per status, and no box around it. The chip carries the colour and
+   the shape a card will actually show, the dropdown names that colour, and the
+   ✕ removes it — three things on a row instead of three nested borders. */
 .status-edit-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 4px 4px 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  display: flex; align-items: center; gap: 10px;
 }
-.status-edit-row input,
-.status-edit-row select {
-  font: inherit; font-size: 12px;
-  color: var(--fg-1);
-  background: var(--surface-3);
+/* The chip: a status pill you can type in. Colour comes from applyStatusColor,
+   the same call the real pills use — inline styles for a legacy hex, a
+   data-color for a token, matched below. */
+.status-chip-input {
+  /* Sizes to its text, like the pill it is a picture of — stretched to fill
+     the row it read as a coloured bar, not a chip. field-sizing does this
+     natively; the min-width keeps a freshly added, empty status clickable. */
+  field-sizing: content;
+  flex: 0 1 auto;
+  min-width: 64px;
+  max-width: 100%;
+  font: inherit;
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: var(--tracking-snug);
+  padding: 6px 13px;
+  border-radius: var(--radius-pill);
+  background: transparent;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 6px 8px;
+  color: var(--fg-2);
   outline: none;
-  transition: border-color var(--dur) var(--ease-out);
+  transition: box-shadow var(--dur) var(--ease-out);
 }
-.status-edit-row input { flex: 1 1 auto; min-width: 0; }
-.status-edit-row select { flex: none; cursor: pointer; }
-/* The colour picker is the branded .cdsel wrapper, not a bare <select>, and
-   .cdsel is width:100% by default — which ate the whole row and squeezed the
-   name field down to 18px, so every status looked nameless. Pin it and let the
-   name take the space it needs. */
-.status-edit-row > .cdsel { flex: 0 0 auto; width: 150px; }
-.status-edit-row input:focus,
-.status-edit-row select:focus { border-color: rgba(255,255,255,0.18); }
-/* Previews the color the chip will actually use, so the row reads as the thing
-   it configures rather than as a dropdown value. */
-.status-swatch {
-  width: 12px; height: 12px; border-radius: 50%;
-  flex: none;
-  border: 1px solid rgba(255,255,255,0.14);
-}
+.status-chip-input::placeholder { color: var(--fg-4); font-weight: 500; }
+.status-chip-input:focus { box-shadow: 0 0 0 3px var(--ring-brand); }
+/* Token colours, mirroring .status-pill[aria-selected="true"] so a chip in the
+   editor and a pill on a card are the same object. */
+.status-chip-input[data-color="brand"]    { background: var(--brand-500);    border-color: transparent;   color: #fff; }
+.status-chip-input[data-color="success"]  { background: var(--success-soft); border-color: var(--success); color: var(--success); }
+.status-chip-input[data-color="warning"]  { background: var(--warning-soft); border-color: var(--warning); color: var(--warning); }
+.status-chip-input[data-color="danger"]   { background: var(--danger-soft);  border-color: var(--danger);  color: var(--danger); }
+.status-chip-input[data-color="info"]     { background: var(--info-soft);    border-color: var(--info);    color: var(--info); }
+.status-chip-input[data-color="muted"]    { background: var(--surface-3);    border-color: var(--ring);    color: var(--fg-2); }
+.status-chip-input[data-color="archived"] { background: #2a2a30; border-color: rgba(255,255,255,0.12); color: #a1a1aa; }
+/* The colour picker sizes to its longest name and no further. */
+/* Pushed to the right so the colour picker and ✕ line up down the column,
+   however wide the chip beside them happens to be. */
+.status-edit-row > .cdsel { flex: 0 0 auto; width: 138px; margin-left: auto; }
+.status-edit-row .cdsel-btn { padding: 7px 11px; font-size: 12px; }
+.status-edit-list { display: flex; flex-direction: column; gap: 8px; }
+/* The add field sizes to the job — a status name is a couple of words, and a
+   full-bleed slab under a column of small chips read as the loudest thing on
+   the tab. Folders keeps its wide field: a path needs the room. */
+.settings-panel[data-panel="statuses"] .modal-input-row input { flex: 0 1 320px; }
 .status-edit-row .remove {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px;

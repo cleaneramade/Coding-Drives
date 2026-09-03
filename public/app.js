@@ -205,15 +205,6 @@ function isHex(c) { return typeof c === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})
 // keyed on these names. Legacy hex still renders (applyStatusColor handles it)
 // — it just isn't offered for new picks.
 const STATUS_COLOR_TOKENS = ["brand", "success", "warning", "danger", "info", "muted", "archived"];
-const STATUS_SWATCH_CSS = {
-  brand:    "var(--brand-500)",
-  success:  "var(--success)",
-  warning:  "var(--warning)",
-  danger:   "var(--danger)",
-  info:     "var(--info)",
-  muted:    "var(--fg-3)",
-  archived: "#a1a1aa",   // matches the archived pill rule in app.css
-};
 // What the colour picker calls each token. The token names are design-system
 // internals — "brand", "muted", "archived" tell a reader nothing about what
 // they will see, so the dropdown shows the colour instead.
@@ -230,10 +221,6 @@ function statusColorLabel(color) {
   // A legacy hex has no name worth printing, and the swatch beside the picker
   // already shows exactly which colour it is.
   return STATUS_COLOR_LABELS[color] || "Custom colour";
-}
-function statusSwatchColor(color) {
-  if (isHex(color)) return color;
-  return STATUS_SWATCH_CSS[color] || "var(--fg-3)";
 }
 
 // projects.json stores status ids, so an id is generated once at creation and
@@ -4066,27 +4053,31 @@ function renderSettings() {
   // Statuses
   const stHost = document.getElementById("set-status-list");
   stHost.innerHTML = "";
+  // Each row IS the chip it configures: the name field is styled as the status
+  // pill in its own colour, so what you type is what a card will show. It used
+  // to be three nested boxes — a bordered row wrapping a bordered input and a
+  // bordered dropdown — with a disconnected dot off to the side telling you
+  // the colour that the dropdown beside it already named.
   settingsState.statuses.forEach((s, i) => {
     const row = document.createElement("div");
     row.className = "status-edit-row";
 
-    const swatch = document.createElement("span");
-    swatch.className = "status-swatch";
-    swatch.style.background = statusSwatchColor(s.color);
-
     const label = document.createElement("input");
     label.type = "text";
+    label.className = "status-chip-input";
     label.value = s.label;
-    label.setAttribute("aria-label", "Status name");
     label.placeholder = "Name this status";
+    label.setAttribute("aria-label", "Status name");
+    applyStatusColor(label, s.color, true);
     // Mutate in place without re-rendering — a re-render here would yank focus
     // out of the field on every keystroke.
     label.addEventListener("input", () => {
       settingsState.statuses[i].label = label.value;
+      del.setAttribute("aria-label", `Remove ${label.value || "status"}`);
     });
 
     const sel = document.createElement("select");
-    sel.setAttribute("aria-label", "Status color");
+    sel.setAttribute("aria-label", "Status colour");
     // A legacy hex from the old customisation screen has no matching token.
     // Offer it as its own option so merely opening Settings doesn't silently
     // convert someone's existing color to a token.
@@ -4098,15 +4089,17 @@ function renderSettings() {
       if (t === s.color) o.selected = true;
       sel.appendChild(o);
     }
+    // Recolour the chip in place. No re-render, so the field keeps focus and
+    // the list doesn't flicker.
     sel.addEventListener("change", () => {
       settingsState.statuses[i].color = sel.value;
-      renderSettings();   // repaint the swatch
+      applyStatusColor(label, sel.value, true);
     });
 
     const del = document.createElement("button");
     del.className = "remove";
     del.type = "button";
-    del.textContent = "✕";
+    del.textContent = "\u2715";
     del.setAttribute("aria-label", `Remove ${s.label}`);
     del.disabled = settingsState.statuses.length <= 1;
     del.addEventListener("click", () => {
@@ -4114,7 +4107,7 @@ function renderSettings() {
       renderSettings();
     });
 
-    row.append(swatch, label, sel, del);
+    row.append(label, sel, del);
     stHost.appendChild(row);
   });
 
