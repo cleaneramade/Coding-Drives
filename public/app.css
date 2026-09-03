@@ -1719,7 +1719,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   flex: 0 0 auto;
   /* No footer any more, so the body claims that height: the cap allows for
      the header, the tab strip and the 32px the card keeps off the viewport. */
-  height: min(760px, calc(100vh - 150px));
+  height: min(760px, calc(100vh - 142px));
 }
 
 /* ── Settings header actions ─────────────────────────────────────────────
@@ -1766,7 +1766,12 @@ body:has(.modal.is-open) { overflow: hidden; }
 /* Settings sits closer to the window edge than other dialogs — it is the one
    with five tabs to fit at a single height, and the Cards tab now carries a
    card preview. Scoped so no other modal grows. */
-#modal-settings .modal-card { max-height: calc(100vh - 32px); }
+#modal-settings .modal-card { max-height: calc(100vh - 24px); }
+/* More than the 8/18 a modal body normally gets: with no footer under it, the
+   last row of the fullest tab sat 19px off the card's rounded bottom edge and
+   the first heading was just as tight under the tab strip. Needs the id to
+   outrank .modal-body, which sets the shared padding further down the file. */
+#modal-settings .settings-body { padding: 15px 20px 24px; }
 
 /* ── Settings tabs ─────────────────────────────────────────────────────────
    A left-to-right strip under the dialog title. Each tab owns the full width
@@ -2506,7 +2511,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   margin: 0 0 6px;
 }
 .settings-help {
-  margin: 0 0 7px;
+  margin: 0 0 6px;
   color: var(--fg-3);
   font-size: 12px;
   line-height: 1.55;
@@ -2522,7 +2527,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 9px 12px;
+  padding: 8px 12px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
