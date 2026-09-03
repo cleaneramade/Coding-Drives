@@ -2063,9 +2063,14 @@ body:has(.modal.is-open) { overflow: hidden; }
    reads as a tag, and these are objects you move. */
 .cardbtn-pill {
   position: relative;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
+  /* Content is LEFT aligned, not centred. Centring each pill on its own label
+     put every logo at a different distance from its pill edge — 26px under
+     Claude, 40px under Gemini — so scanning the grid, the short labels read as
+     shoved right even though each pill is centred to the pixel. Aligning left
+     puts all eight marks in one column and the row reads as a grid. */
+  display: flex; align-items: center; justify-content: flex-start; gap: 9px;
   min-width: 0; width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   background: var(--surface-2); color: var(--fg-1);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   font-size: 12px; font-weight: 600;
@@ -2183,9 +2188,12 @@ body:has(.modal.is-open) { overflow: hidden; }
    so a flat 15px would render Claude small and Codex heavy. Mirrors the same
    normalisation applied to .vendor-btn on the cards. */
 .cardbtn-pill-mark.vendor-claude svg { width: 17px; height: 17px; }
+/* Gemini's spark is four thin arms, so at a matched box size it carries far
+   less ink than the solid marks beside it and reads a size smaller. Nudged up
+   to even out the perceived weight along the row. */
+.cardbtn-pill-mark.vendor-gemini svg { width: 17px; height: 17px; }
 .cardbtn-pill-mark.vendor-codex svg,
-.cardbtn-pill-mark.vendor-antigravity svg,
-.cardbtn-pill-mark.vendor-gemini svg { width: 16px; height: 16px; }
+.cardbtn-pill-mark.vendor-antigravity svg { width: 16px; height: 16px; }
 
 .gh-vis-opt {
   position: relative;

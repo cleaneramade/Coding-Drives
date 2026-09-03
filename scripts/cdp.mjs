@@ -13,7 +13,7 @@
 // Usage:
 //   node scripts/cdp.mjs reload                  reload the renderer
 //   node scripts/cdp.mjs eval "<js>"             evaluate (top-level await ok)
-//   node scripts/cdp.mjs shot out.png [x y w h]  screenshot, optional clip
+//   node scripts/cdp.mjs shot out.png [x y w h [scale]]  screenshot + zoom
 //
 // See memory: coding-drives-ui-verification.
 import { writeFileSync } from "node:fs";
@@ -67,14 +67,17 @@ try {
       console.log(typeof v === "string" ? v : JSON.stringify(v, null, 1));
     }
   } else if (cmd === "shot") {
-    const [out, x, y, w, h] = rest;
+    // Optional trailing magnification: `shot out.png x y w h 4` renders the clip
+    // at 4x, which is how you settle an "is this actually centred" question
+    // without squinting at a 16px logo.
+    const [out, x, y, w, h, scale] = rest;
     const params = { format: "png" };
-    if (w && h) params.clip = { x: +x, y: +y, width: +w, height: +h, scale: 1 };
+    if (w && h) params.clip = { x: +x, y: +y, width: +w, height: +h, scale: +scale || 1 };
     const r = await cdp.send("Page.captureScreenshot", params);
     writeFileSync(out, Buffer.from(r.data, "base64"));
     console.log("saved", out);
   } else {
-    console.log("usage: cdp.mjs reload | eval \"<js>\" | shot out.png [x y w h]");
+    console.log("usage: cdp.mjs reload | eval \"<js>\" | shot out.png [x y w h [scale]]");
   }
 } finally {
   cdp.close();
