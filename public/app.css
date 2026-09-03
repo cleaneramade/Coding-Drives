@@ -2154,11 +2154,13 @@ body:has(.modal.is-open) { overflow: hidden; }
 .cardbtn-slot {
   position: relative;
   display: grid;
+  justify-items: center;
+  gap: 7px;
   min-width: 0;
-  padding: 4px;
+  padding: 9px 10px 10px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px dashed var(--ring);
-  border-radius: 14px;
+  border-radius: 16px;
   cursor: pointer;
   transition: border-color var(--dur) var(--ease-out),
               background var(--dur) var(--ease-out),
@@ -2188,23 +2190,24 @@ body:has(.modal.is-open) { overflow: hidden; }
   background: rgba(255, 255, 255, 0.02);
 }
 .cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-active="true"]:not([data-over="true"]) .cardbtn-slot-num {
-  color: var(--fg-4);
+  background: var(--surface-3); color: var(--fg-3);
 }
-/* Corner index. Ties the slot to the number the shelf badges onto whichever
-   tool is sitting in it, without printing a caption a real card never has. */
+/* The slot index, in its own row above the button rather than a chip stuck on
+   the dashed edge — it had been colliding with the pill's corner, and a badge
+   half-outside its own box always reads like a sticker. Centred, so the three
+   slots line up as a matched set, and unbordered so it stays quiet until the
+   slot is the one being filled. */
 .cardbtn-slot-num {
-  position: absolute; top: -7px; left: 8px;
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 15px; height: 15px; padding: 0 4px;
+  min-width: 17px; height: 17px; padding: 0 5px;
   border-radius: 999px;
-  font-size: 9px; font-weight: 700; line-height: 1;
-  background: var(--surface-solid); color: var(--fg-4);
-  border: 1px solid var(--border);
+  font-size: 9.5px; font-weight: 700; line-height: 1;
+  background: var(--surface-3); color: var(--fg-3);
   transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
 .cardbtn-slot[data-active="true"] .cardbtn-slot-num,
 .cardbtn-slot[data-over="true"] .cardbtn-slot-num {
-  background: var(--brand-500); color: #fff; border-color: var(--brand-500);
+  background: var(--brand-500); color: #fff;
 }
 /* Inside a slot the pill IS the card's action button, so it takes that
    button's exact metrics: .btn's radius, .card-actions .btn's padding, and the
