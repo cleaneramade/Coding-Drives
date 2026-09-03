@@ -2178,8 +2178,14 @@ body:has(.modal.is-open) { overflow: hidden; }
               transform var(--dur-fast) var(--ease-out);
 }
 .cardbtn-pill:active { cursor: grabbing; }
+/* The mark's BOX is a fixed 18px square whatever the glyph inside it is drawn
+   at. Without that, the one oversized mark (Gemini's spark, drawn at 20px to
+   even out its optical weight) made its whole grid row taller than the row
+   below — the shelf's two rows have to match. A larger glyph simply overhangs
+   the box; nothing clips. */
 .cardbtn-pill-mark {
   display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
   flex-shrink: 0; color: #fff;
 }
 .cardbtn-pill-mark svg { display: block; width: 15px; height: 15px; }
