@@ -3533,23 +3533,24 @@ function openSettings() {
 // when it renders, so switching INTO the Cards tab repaints it — otherwise it
 // would have laid itself out while hidden (zero width).
 let settingsTab = "cards";
-// Move the underline to the active tab's LABEL — measured with a Range, so it
-// tracks the word rather than the equal-width column the button occupies.
-// `animate: false` for the first paint after the dialog opens, otherwise the
-// bar slides in from the left edge every single time.
+// Slide the thumb onto the active tab. It sizes to the BUTTON, not the label:
+// the thumb is a background, so it should cover the whole option the way a
+// segmented control does. Absolutely positioned against the strip's padding
+// box, hence subtracting the border. `animate: false` for the first paint
+// after the dialog opens, otherwise it slides in from the left edge every
+// single time.
 function positionTabInk({ animate = true } = {}) {
   const strip = document.querySelector(".settings-tabs");
   const ink = strip?.querySelector(".settings-tab-ink");
   const active = strip?.querySelector('.settings-tab[aria-selected="true"]');
   if (!strip || !ink || !active) return;
-  const range = document.createRange();
-  range.selectNodeContents(active);
-  const label = range.getBoundingClientRect();
+  const btn = active.getBoundingClientRect();
   const host = strip.getBoundingClientRect();
-  if (!label.width) return;          // dialog still hidden — nothing to measure
+  if (!btn.width) return;            // dialog still hidden — nothing to measure
+  const border = parseFloat(getComputedStyle(strip).borderLeftWidth) || 0;
   if (!animate) ink.style.transition = "none";
-  ink.style.width = `${Math.round(label.width)}px`;
-  ink.style.transform = `translateX(${Math.round(label.left - host.left)}px)`;
+  ink.style.width = `${Math.round(btn.width)}px`;
+  ink.style.transform = `translateX(${Math.round(btn.left - host.left - border)}px)`;
   if (!animate) { void ink.offsetWidth; ink.style.transition = ""; }
 }
 window.addEventListener("resize", () => positionTabInk({ animate: false }));

@@ -1719,7 +1719,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   flex: 0 0 auto;
   /* No footer any more, so the body claims that height: the cap allows for
      the header, the tab strip and the 32px the card keeps off the viewport. */
-  height: min(760px, calc(100vh - 128px));
+  height: min(760px, calc(100vh - 130px));
 }
 
 /* ── Settings header actions ─────────────────────────────────────────────
@@ -1775,44 +1775,53 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-tabs {
   position: relative;
   display: flex;
-  gap: 4px;
-  padding: 4px 20px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  /* A floating control, not a strip welded to the dialog. The old full-width
+     rule under it cut the header off from the body and made the tabs read as
+     a fixed piece of chrome; inset and rounded, the group reads as one thing
+     you can move between, and the panel below simply follows it. */
+  margin: 2px 20px 8px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  user-select: none;
 }
-/* Hover used to paint a filled, round-topped block — a browser-tab shape —
-   while the SELECTED tab was marked by a thin underline. Two different
-   metaphors for two states of the same control, and the hover one shouted
-   louder, so pointing at a tab made it look more selected than the selected
-   one. Hover is now only a brightening of the label; the underline alone says
-   which tab you are on. */
+/* Same shape language as the app's other segmented controls: a tinted thumb
+   slides to the active option, and the labels sit on top of it. */
 .settings-tab {
   flex: 1 1 0;
   position: relative;
-  padding: 10px 8px 12px;
+  z-index: 1;
+  padding: 6px 8px;
   font: inherit; font-size: 12px; font-weight: 600;
   letter-spacing: var(--tracking-snug);
   color: var(--fg-3);
   background: transparent;
   border: 0;
+  border-radius: 999px;
   cursor: pointer;
+  white-space: nowrap;
   transition: color var(--dur) var(--ease-out);
 }
 .settings-tab:hover { color: var(--fg-1); }
-.settings-tab[aria-selected="true"] { color: var(--brand-300); }
-.settings-tab:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: -3px; border-radius: var(--radius-sm); }
-/* The indicator: one bar for the strip, sized to the active LABEL rather than
-   to the tab's equal-width column, so it reads as belonging to the word.
-   Sits ON the strip's bottom border so the tab connects to the panel. */
+.settings-tab[aria-selected="true"] { color: var(--fg-1); }
+.settings-tab:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: -2px; }
+/* The thumb: one element for the whole group, moved and sized to the active
+   tab. Absolutely positioned inside the padding box, so top/bottom 0 is
+   exactly the height of the button row. */
 .settings-tab-ink {
   position: absolute;
-  left: 0; bottom: -1px;
+  left: 0; top: 0; bottom: 0;
   width: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--brand-500);
+  border-radius: 999px;
+  background: var(--tile-violet-bg);
+  border: 1px solid var(--brand-500);
+  box-sizing: border-box;
   pointer-events: none;
   transition: transform var(--dur) var(--ease-out), width var(--dur) var(--ease-out);
 }
+
 
 /* One panel at a time; sections inside it stack full-width. */
 .settings-panel { display: flex; flex-direction: column; gap: 14px; }
