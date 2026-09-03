@@ -2344,7 +2344,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 
 /* ── Settings sections ───────────────────────────────────────────────────── */
 .settings-section {
-  padding: 14px 0;
+  padding: 18px 0 20px;
   border-bottom: 1px solid var(--border-soft);
 }
 .settings-section:last-of-type { border-bottom: 0; }
@@ -2355,13 +2355,13 @@ body:has(.modal.is-open) { overflow: hidden; }
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   color: var(--fg-2);
-  margin: 0 0 6px;
+  margin: 0 0 7px;
 }
 .settings-help {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   color: var(--fg-3);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 .settings-help em { font-style: normal; color: var(--warning); font-weight: 600; }
 
@@ -2374,7 +2374,13 @@ body:has(.modal.is-open) { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 16px;
+  padding: 13px 15px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
+.settings-toggle-row:hover { background: rgba(255, 255, 255, 0.035); border-color: var(--border); }
 /* The label column takes the leftover width; the control on the right sizes to
    itself. Without this a full-width control (the branded dropdown is
    width:100% by default) eats the whole row and squeezes the description down
@@ -2392,20 +2398,21 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-toggle-group {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 2px;
 }
 .settings-toggle-label {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 .settings-toggle-title {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--fg-1);
+  line-height: 1.25;
 }
 /* When the section title + help paragraph live inside a toggle row, their
    default block margins push the switch out of vertical alignment. Reset

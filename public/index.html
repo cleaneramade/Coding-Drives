@@ -160,12 +160,12 @@
         <div class="settings-panel" data-panel="cards">
           <section class="settings-section">
             <h3 class="settings-title">What each card shows</h3>
-            <p class="settings-help">Turn the badge rows under a project name on or off.</p>
+            <p class="settings-help">Pick the little labels that sit under a project’s name.</p>
             <div class="settings-toggle-group">
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
                   <span class="settings-toggle-title">Tech badges</span>
-                  <p class="settings-help">The framework chip plus GIT / VERCEL / ENV markers.</p>
+                  <p class="settings-help">Shows what a project is built with, and whether it uses Git, Vercel or a secrets file.</p>
                 </div>
                 <span class="switch">
                   <input type="checkbox" id="set-show-stack" aria-label="Show tech badges" />
@@ -175,7 +175,7 @@
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
                   <span class="settings-toggle-title">Language badges</span>
-                  <p class="settings-help">The coloured language mix under each project.</p>
+                  <p class="settings-help">Shows which coding languages a project uses, as coloured chips.</p>
                 </div>
                 <span class="switch">
                   <input type="checkbox" id="set-show-langs" aria-label="Show language badges" />
@@ -195,9 +195,9 @@
                both containers are filled from script. -->
           <section class="settings-section">
             <h3 class="settings-title">Card buttons</h3>
-            <p class="settings-help">Every tool, with Claude and Codex as an app or a terminal. Drag one onto a button below — or tap a button, then tap a tool.</p>
+            <p class="settings-help">Every card has three buttons. You choose what they open.<br />Drag a tool down onto a button. Or tap a button, then tap a tool.</p>
             <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
-            <p class="cardbtn-slots-cap">The three buttons on every card</p>
+            <p class="cardbtn-slots-cap">Your three buttons</p>
             <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
           </section>
         </div>
@@ -206,12 +206,12 @@
         <div class="settings-panel" data-panel="tasks" hidden>
           <section class="settings-section">
             <h3 class="settings-title">Tasks &amp; sessions</h3>
-            <p class="settings-help">How tasks are written, and how the terminals that run them behave.</p>
+            <p class="settings-help">How you write a task, and how it runs.</p>
             <div class="settings-toggle-group">
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
-                  <span class="settings-toggle-title">Open editor for new tasks</span>
-                  <p class="settings-help">Naming a task opens its editor for a description, links and an image.</p>
+                  <span class="settings-toggle-title">Open a new task right away</span>
+                  <p class="settings-help">As soon as you name a task, it opens. Then you can add notes, links and a picture.</p>
                 </div>
                 <span class="switch">
                   <input type="checkbox" id="set-open-task-editor" aria-label="Open editor for new tasks" />
@@ -220,8 +220,8 @@
               </div>
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
-                  <span class="settings-toggle-title">Headless background terminals</span>
-                  <p class="settings-help">Sessions start minimised and close themselves when the work is done.</p>
+                  <span class="settings-toggle-title">Run tasks out of sight</span>
+                  <p class="settings-help">The black terminal window stays hidden while a task runs, and shuts itself when the work is done.</p>
                 </div>
                 <span class="switch">
                   <input type="checkbox" id="set-headless-terminals" aria-label="Headless background terminals" />
@@ -230,8 +230,8 @@
               </div>
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
-                  <span class="settings-toggle-title">Remote control</span>
-                  <p class="settings-help">Steer a running session from the Claude phone app. Claude Code only.</p>
+                  <span class="settings-toggle-title">Steer a task from your phone</span>
+                  <p class="settings-help">Answer a running task from the Claude app on your phone. Claude Code only.</p>
                 </div>
                 <span class="switch">
                   <input type="checkbox" id="set-remote-control" aria-label="Remote control" />
@@ -240,8 +240,8 @@
               </div>
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
-                  <span class="settings-toggle-title">Send tasks with</span>
-                  <p class="settings-help">Which agent the task send buttons launch.</p>
+                  <span class="settings-toggle-title">Send tasks to</span>
+                  <p class="settings-help">Which AI picks up a task when you send it.</p>
                 </div>
                 <div class="gh-vis-segment task-agent-segment" id="set-task-agent" data-active="claude" role="radiogroup" aria-label="Task agent">
                   <span class="gh-vis-thumb" aria-hidden="true"></span>
@@ -252,7 +252,7 @@
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
                   <span class="settings-toggle-title">Model</span>
-                  <p class="settings-help" id="set-model-help">Which model that agent runs. Default uses the CLI's own setting.</p>
+                  <p class="settings-help" id="set-model-help">Which brain that AI uses. Default lets it choose for itself.</p>
                 </div>
                 <select id="set-task-model" class="cd-select" aria-label="Agent model"></select>
               </div>
@@ -264,10 +264,10 @@
         <div class="settings-panel" data-panel="statuses" hidden>
           <section class="settings-section">
             <h3 class="settings-title">Statuses</h3>
-            <p class="settings-help">The chips a project can be filed under. Removing one moves its projects to the first status in the list.</p>
+            <p class="settings-help">The labels you can give a project, like Building or Live.<br />Delete a label and its projects move to the first one on the list.</p>
             <div id="set-status-list" class="status-edit-list"></div>
             <div class="modal-input-row">
-              <input id="set-status-add" type="text" placeholder="Status name (e.g., Testing)" autocomplete="off" />
+              <input id="set-status-add" type="text" placeholder="Name a status, like Testing" autocomplete="off" />
               <button class="btn btn-brand" id="set-status-confirm" type="button">Add</button>
             </div>
           </section>
@@ -276,22 +276,22 @@
         <!-- ── Folders ────────────────────────────────────────────────── -->
         <div class="settings-panel" data-panel="folders" hidden>
           <section class="settings-section">
-            <h3 class="settings-title">Scan folders</h3>
-            <p class="settings-help">Every folder here is scanned for project subfolders.</p>
+            <h3 class="settings-title">Where your projects live</h3>
+            <p class="settings-help">Coding Drives looks inside these folders and shows every project it finds.</p>
             <div id="set-scan-paths" class="path-list"></div>
             <div class="modal-input-row">
-              <input id="set-scan-add" type="text" placeholder="C:\path\to\projects" autocomplete="off" />
+              <input id="set-scan-add" type="text" placeholder="Paste a folder, or press Browse" autocomplete="off" />
               <button class="btn btn-secondary" id="set-scan-pick" type="button">Browse</button>
               <button class="btn btn-brand" id="set-scan-confirm" type="button">Add</button>
             </div>
           </section>
 
           <section class="settings-section">
-            <h3 class="settings-title">Excluded folder names</h3>
-            <p class="settings-help">Folder names skipped everywhere &mdash; scanning, backups and GitHub publishing.</p>
+            <h3 class="settings-title">Folders to skip</h3>
+            <p class="settings-help">Any folder with one of these names is left alone — when looking for projects, when backing up, and when sending to GitHub.</p>
             <div id="set-exclude-list" class="chip-edit-row"></div>
             <div class="modal-input-row">
-              <input id="set-exclude-add" type="text" placeholder="Folder name (e.g., Archive)" autocomplete="off" />
+              <input id="set-exclude-add" type="text" placeholder="A folder name to skip, like Archive" autocomplete="off" />
               <button class="btn btn-secondary" id="set-exclude-pick" type="button">
                 <span>Browse</span>
               </button>
@@ -300,11 +300,11 @@
           </section>
 
           <section class="settings-section">
-            <h3 class="settings-title">Backup destination</h3>
-            <p class="settings-help">Where a card&rsquo;s Backup action mirrors the project folder to.</p>
+            <h3 class="settings-title">Where backups go</h3>
+            <p class="settings-help">Press Backup on a card and the whole project folder is copied here.</p>
             <div class="modal-input-row">
               <div class="input-with-paste">
-                <input id="set-backup-path" type="text" placeholder="C:\path\to\backups (browse or paste)" autocomplete="off" readonly />
+                <input id="set-backup-path" type="text" placeholder="Paste a folder, or press Browse" autocomplete="off" readonly />
                 <button class="paste-icon-btn" id="set-backup-paste" type="button" aria-label="Paste from clipboard">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
                 </button>
@@ -320,7 +320,7 @@
         <div class="settings-panel" data-panel="app" hidden>
           <section class="settings-section">
             <h3 class="settings-title">App logo</h3>
-            <p class="settings-help">PNG, ICO, JPG or SVG &mdash; 256&times;256 works best.</p>
+            <p class="settings-help">Use your own picture for the app. PNG, ICO, JPG or SVG. A square one, 256 by 256, looks best.</p>
             <div class="logo-row">
               <img class="logo-preview" id="set-logo-preview" src="/api/logo" alt="" />
               <div class="logo-actions">

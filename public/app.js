@@ -3574,13 +3574,13 @@ document.getElementById("set-remote-control")?.addEventListener("change", (e) =>
 // completely different model ids.
 const AGENT_MODELS = {
   claude: [
-    { value: "", label: "Default (CLI setting)" },
+    { value: "", label: "Let the AI choose" },
     { value: "claude-opus-5", label: "Opus 5 — most capable" },
     { value: "claude-sonnet-5", label: "Sonnet 5 — balanced" },
     { value: "claude-haiku-4-5", label: "Haiku 4.5 — fastest" },
   ],
   codex: [
-    { value: "", label: "Default (CLI setting)" },
+    { value: "", label: "Let the AI choose" },
     { value: "gpt-5-codex", label: "gpt-5-codex" },
     { value: "gpt-5", label: "gpt-5" },
   ],
@@ -3607,8 +3607,8 @@ function renderTaskModelSelect() {
   const help = document.getElementById("set-model-help");
   if (help) {
     help.textContent = agent === "codex"
-      ? "Which model Codex runs. Default uses the CLI's own setting."
-      : "Which model Claude Code runs. Default uses the CLI's own setting.";
+      ? "Which brain Codex uses. Default lets Codex choose for itself."
+      : "Which brain Claude Code uses. Default lets Claude choose for itself.";
   }
 }
 document.getElementById("set-task-model")?.addEventListener("change", (e) => {
