@@ -1773,11 +1773,18 @@ body:has(.modal.is-open) { overflow: hidden; }
    of the body, so a wide control (the card-buttons builder) never has to share
    a row with a one-line toggle and the padding stays identical on both sides. */
 .settings-tabs {
+  position: relative;
   display: flex;
   gap: 4px;
   padding: 4px 20px 0;
   border-bottom: 1px solid var(--border);
 }
+/* Hover used to paint a filled, round-topped block — a browser-tab shape —
+   while the SELECTED tab was marked by a thin underline. Two different
+   metaphors for two states of the same control, and the hover one shouted
+   louder, so pointing at a tab made it look more selected than the selected
+   one. Hover is now only a brightening of the label; the underline alone says
+   which tab you are on. */
 .settings-tab {
   flex: 1 1 0;
   position: relative;
@@ -1787,23 +1794,25 @@ body:has(.modal.is-open) { overflow: hidden; }
   color: var(--fg-3);
   background: transparent;
   border: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   cursor: pointer;
-  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+  transition: color var(--dur) var(--ease-out);
 }
-.settings-tab:hover { color: var(--fg-1); background: var(--surface-2); }
+.settings-tab:hover { color: var(--fg-1); }
 .settings-tab[aria-selected="true"] { color: var(--brand-300); }
-/* Underline sits ON the border so the selected tab reads as connected to the
-   panel below it. */
-.settings-tab[aria-selected="true"]::after {
-  content: "";
+.settings-tab:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: -3px; border-radius: var(--radius-sm); }
+/* The indicator: one bar for the strip, sized to the active LABEL rather than
+   to the tab's equal-width column, so it reads as belonging to the word.
+   Sits ON the strip's bottom border so the tab connects to the panel. */
+.settings-tab-ink {
   position: absolute;
-  left: 8px; right: 8px; bottom: -1px;
+  left: 0; bottom: -1px;
+  width: 0;
   height: 2px;
   border-radius: 2px;
   background: var(--brand-500);
+  pointer-events: none;
+  transition: transform var(--dur) var(--ease-out), width var(--dur) var(--ease-out);
 }
-.settings-tab:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: -2px; }
 
 /* One panel at a time; sections inside it stack full-width. */
 .settings-panel { display: flex; flex-direction: column; gap: 14px; }

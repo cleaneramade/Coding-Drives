@@ -3523,6 +3523,9 @@ function openSettings() {
     settingsError("");
     settingsModal.style.display = "";
     settingsModal.classList.add("is-open");
+    // setSettingsTab ran while the dialog was still display:none, so the ink
+    // had nothing to measure. Place it now it has a size, without animating.
+    positionTabInk({ animate: false });
   }).catch((err) => toast({ kind: "error", title: "Couldn't load settings", sub: err.message }));
 }
 // ── Settings tabs ─────────────────────────────────────────────────────────
@@ -3530,21 +3533,61 @@ function openSettings() {
 // when it renders, so switching INTO the Cards tab repaints it — otherwise it
 // would have laid itself out while hidden (zero width).
 let settingsTab = "cards";
+// Move the underline to the active tab's LABEL — measured with a Range, so it
+// tracks the word rather than the equal-width column the button occupies.
+// `animate: false` for the first paint after the dialog opens, otherwise the
+// bar slides in from the left edge every single time.
+function positionTabInk({ animate = true } = {}) {
+  const strip = document.querySelector(".settings-tabs");
+  const ink = strip?.querySelector(".settings-tab-ink");
+  const active = strip?.querySelector('.settings-tab[aria-selected="true"]');
+  if (!strip || !ink || !active) return;
+  const range = document.createRange();
+  range.selectNodeContents(active);
+  const label = range.getBoundingClientRect();
+  const host = strip.getBoundingClientRect();
+  if (!label.width) return;          // dialog still hidden — nothing to measure
+  if (!animate) ink.style.transition = "none";
+  ink.style.width = `${Math.round(label.width)}px`;
+  ink.style.transform = `translateX(${Math.round(label.left - host.left)}px)`;
+  if (!animate) { void ink.offsetWidth; ink.style.transition = ""; }
+}
+window.addEventListener("resize", () => positionTabInk({ animate: false }));
+
 function setSettingsTab(tab) {
   settingsTab = tab;
-  document.querySelectorAll(".settings-tab").forEach((b) =>
-    b.setAttribute("aria-selected", String(b.dataset.tab === tab))
-  );
+  document.querySelectorAll(".settings-tab").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.setAttribute("aria-selected", String(on));
+    // Roving tabindex: one stop for the whole strip, then arrow keys within it.
+    b.tabIndex = on ? 0 : -1;
+  });
   document.querySelectorAll(".settings-panel").forEach((pnl) => {
     pnl.hidden = pnl.dataset.panel !== tab;
   });
   const body = document.querySelector(".settings-body");
   if (body) body.scrollTop = 0;
   if (tab === "cards" && settingsState) renderCardButtonsEditor();
+  positionTabInk();
 }
 document.querySelector(".settings-tabs")?.addEventListener("click", (e) => {
   const btn = e.target.closest(".settings-tab");
   if (btn) setSettingsTab(btn.dataset.tab);
+});
+// Arrow keys walk the strip, Home / End jump to its ends — what a role=tablist
+// is expected to do, and it was doing none of it.
+document.querySelector(".settings-tabs")?.addEventListener("keydown", (e) => {
+  const step = { ArrowLeft: -1, ArrowRight: 1, Home: "first", End: "last" }[e.key];
+  if (step === undefined) return;
+  const list = [...document.querySelectorAll(".settings-tab")];
+  const i = list.indexOf(document.activeElement);
+  if (i === -1) return;
+  e.preventDefault();
+  const next = step === "first" ? 0
+    : step === "last" ? list.length - 1
+    : (i + step + list.length) % list.length;
+  list[next].focus();
+  setSettingsTab(list[next].dataset.tab);
 });
 
 function closeSettings() {

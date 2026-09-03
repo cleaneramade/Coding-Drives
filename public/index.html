@@ -154,17 +154,21 @@
            identical left and right, and means no section is ever waiting on
            empty space for a control that lives somewhere else. -->
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button class="settings-tab" type="button" role="tab" data-tab="cards" aria-selected="true">Cards</button>
-        <button class="settings-tab" type="button" role="tab" data-tab="tasks" aria-selected="false">Tasks</button>
-        <button class="settings-tab" type="button" role="tab" data-tab="statuses" aria-selected="false">Statuses</button>
-        <button class="settings-tab" type="button" role="tab" data-tab="folders" aria-selected="false">Folders</button>
-        <button class="settings-tab" type="button" role="tab" data-tab="app" aria-selected="false">App</button>
+        <button class="settings-tab" type="button" role="tab" id="set-tab-cards" aria-controls="set-panel-cards" data-tab="cards" aria-selected="true" tabindex="0">Cards</button>
+        <button class="settings-tab" type="button" role="tab" id="set-tab-tasks" aria-controls="set-panel-tasks" data-tab="tasks" aria-selected="false" tabindex="-1">Tasks</button>
+        <button class="settings-tab" type="button" role="tab" id="set-tab-statuses" aria-controls="set-panel-statuses" data-tab="statuses" aria-selected="false" tabindex="-1">Statuses</button>
+        <button class="settings-tab" type="button" role="tab" id="set-tab-folders" aria-controls="set-panel-folders" data-tab="folders" aria-selected="false" tabindex="-1">Folders</button>
+        <button class="settings-tab" type="button" role="tab" id="set-tab-app" aria-controls="set-panel-app" data-tab="app" aria-selected="false" tabindex="-1">App</button>
+        <!-- One underline for the whole strip, moved and resized to the active
+             tab's LABEL in positionTabInk() (app.js). One element that slides
+             beats five that blink on and off. -->
+        <span class="settings-tab-ink" aria-hidden="true"></span>
       </div>
 
       <div class="modal-body settings-body">
 
         <!-- ── Cards ──────────────────────────────────────────────────── -->
-        <div class="settings-panel" data-panel="cards">
+        <div class="settings-panel" id="set-panel-cards" role="tabpanel" aria-labelledby="set-tab-cards" data-panel="cards">
           <section class="settings-section">
             <h3 class="settings-title">What each card shows</h3>
             <p class="settings-help">Pick the little labels that sit under a project’s name.</p>
@@ -263,7 +267,7 @@
         </div>
 
         <!-- ── Tasks ──────────────────────────────────────────────────── -->
-        <div class="settings-panel" data-panel="tasks" hidden>
+        <div class="settings-panel" id="set-panel-tasks" role="tabpanel" aria-labelledby="set-tab-tasks" data-panel="tasks" hidden>
           <section class="settings-section">
             <h3 class="settings-title">Tasks &amp; sessions</h3>
             <p class="settings-help">How you write a task, and how it runs.</p>
@@ -321,7 +325,7 @@
         </div>
 
         <!-- ── Statuses ───────────────────────────────────────────────── -->
-        <div class="settings-panel" data-panel="statuses" hidden>
+        <div class="settings-panel" id="set-panel-statuses" role="tabpanel" aria-labelledby="set-tab-statuses" data-panel="statuses" hidden>
           <section class="settings-section">
             <h3 class="settings-title">Statuses</h3>
             <p class="settings-help">The labels you give a project. Delete one and its projects move to the first label.</p>
@@ -334,7 +338,7 @@
         </div>
 
         <!-- ── Folders ────────────────────────────────────────────────── -->
-        <div class="settings-panel" data-panel="folders" hidden>
+        <div class="settings-panel" id="set-panel-folders" role="tabpanel" aria-labelledby="set-tab-folders" data-panel="folders" hidden>
           <section class="settings-section">
             <h3 class="settings-title">Where your projects live</h3>
             <p class="settings-help">Coding Drives looks inside these folders and shows every project it finds.</p>
@@ -377,7 +381,7 @@
         </div>
 
         <!-- ── App ────────────────────────────────────────────────────── -->
-        <div class="settings-panel" data-panel="app" hidden>
+        <div class="settings-panel" id="set-panel-app" role="tabpanel" aria-labelledby="set-tab-app" data-panel="app" hidden>
           <section class="settings-section">
             <h3 class="settings-title">App logo</h3>
             <p class="settings-help">Use your own picture for the app. PNG, ICO, JPG or SVG. A square one, 256 by 256, looks best.</p>
