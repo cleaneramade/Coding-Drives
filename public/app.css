@@ -478,7 +478,12 @@ body {
 .vendor-codex  .vendor-mark svg { width: 16px; height: 16px; }
 .vendor-cursor .vendor-mark svg { width: 15px; height: 15px; }
 .vendor-antigravity .vendor-mark svg { width: 16px; height: 16px; }
-.vendor-gemini .vendor-mark svg { width: 16px; height: 16px; }
+/* Same optical correction as the Settings pill — see the .cardbtn-pill notes.
+   The spark is mostly empty space, so it is drawn larger and set tighter to
+   its label than the solid marks are. */
+.vendor-gemini .vendor-mark svg { width: 19px; height: 19px; }
+.vendor-gemini { gap: 5px; }
+.vendor-gemini .vendor-label { margin-right: 4px; }
 .vendor-btn .vendor-label { line-height: 1; letter-spacing: 0.01em; }
 
 /* Hover flips the button fill from neutral to brand. No colored drop shadow
@@ -2221,12 +2226,25 @@ body:has(.modal.is-open) { overflow: hidden; }
    so a flat 15px would render Claude small and Codex heavy. Mirrors the same
    normalisation applied to .vendor-btn on the cards. */
 .cardbtn-pill-mark.vendor-claude svg { width: 17px; height: 17px; }
-/* Gemini's spark is four thin arms, so at a matched box size it carries far
-   less ink than the solid marks beside it and reads a size smaller. Nudged up
-   to even out the perceived weight along the row. */
-.cardbtn-pill-mark.vendor-gemini svg { width: 17px; height: 17px; }
 .cardbtn-pill-mark.vendor-codex svg,
 .cardbtn-pill-mark.vendor-antigravity svg { width: 16px; height: 16px; }
+/* Gemini is the one mark that needs an optical correction rather than a size
+   match. Its spark is four needles: the outer third of the glyph on every side
+   is nearly invisible, so its ink box — which is what centring is computed
+   from — badly overstates how much of it the eye registers. Matched to the
+   others it reads as a small dot marooned to the left of a heavy label, and
+   the pair looks shoved right even though the pill is centred to 0.01px.
+   Drawn larger so it carries its share of the weight, and set tighter to its
+   label so the two read as one cluster instead of a dot and some text. */
+.cardbtn-pill-mark.vendor-gemini svg { width: 20px; height: 20px; }
+.cardbtn-pill[data-tool="gemini"] { gap: 5px; }
+/* And the last 2px: the needles the eye does not see are still counted when
+   the cluster is centred, and a light mark beside a heavy label pulls the
+   apparent weight rightwards on top of that. 4px of phantom margin past the
+   label moves the pair 2px left, which is where it actually looks centred.
+   Applied to the label rather than the pill so it survives the tighter
+   padding a pill gets inside a slot. */
+.cardbtn-pill[data-tool="gemini"] .cardbtn-pill-name { margin-right: 4px; }
 
 .gh-vis-opt {
   position: relative;

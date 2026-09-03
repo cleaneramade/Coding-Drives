@@ -3737,6 +3737,9 @@ function cardBtnPill(id) {
   const pill = document.createElement("div");
   pill.className = "cardbtn-pill";
   pill.dataset.choice = id;
+  // Lets CSS reach a single vendor for an optical correction without the
+  // .vendor-* class, whose :hover rules would repaint the whole pill.
+  pill.dataset.tool = choice.tool;
   pill.draggable = true;
 
   const mark = document.createElement("span");
