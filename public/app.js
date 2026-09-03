@@ -253,10 +253,14 @@ const TOAST_ICONS = {
   warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 10 17H2Z"/><path d="M12 10v5"/><circle cx="12" cy="18" r="0.7" fill="currentColor"/></svg>',
 };
 
+// Cap the stack so a burst (several sessions ending at once) can't paper over
+// the app. Oldest goes first.
+const TOAST_MAX = 4;
 function toast({ kind = "info", title, sub, ttlMs = 4000, action }) {
   const el = document.createElement("div");
   el.className = "toast";
   el.dataset.kind = kind;
+  el.setAttribute("role", kind === "error" ? "alert" : "status");
   const iconSvg = TOAST_ICONS[kind] || TOAST_ICONS.info;
   el.innerHTML = `
     <div class="toast-icon" aria-hidden="true">${iconSvg}</div>
@@ -264,15 +268,24 @@ function toast({ kind = "info", title, sub, ttlMs = 4000, action }) {
       <div class="t-title"></div>
       ${sub ? '<div class="t-sub"></div>' : ''}
     </div>
+    <button class="toast-close" type="button" aria-label="Dismiss">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+    </button>
+    <span class="toast-timer" aria-hidden="true"><i style="animation-duration:${ttlMs}ms"></i></span>
   `;
   el.querySelector(".t-title").textContent = title;
   if (sub) el.querySelector(".t-sub").textContent = sub;
+  let dismissed = false;
   const dismiss = () => {
-    el.style.transition = "opacity 220ms ease, transform 220ms ease";
-    el.style.opacity = "0";
-    el.style.transform = "translateY(8px)";
+    if (dismissed) return;
+    dismissed = true;
+    el.classList.add("is-leaving");
     setTimeout(() => el.remove(), 240);
   };
+  el.querySelector(".toast-close").addEventListener("click", () => { clearTimeout(timer); dismiss(); });
+  // Hovering pauses the countdown — a toast you're reading shouldn't vanish.
+  el.addEventListener("mouseenter", () => { clearTimeout(timer); el.classList.add("is-held"); });
+  el.addEventListener("mouseleave", () => { el.classList.remove("is-held"); timer = setTimeout(dismiss, 1600); });
   // Optional action button (e.g. Undo) — sits on the far right, vertically
   // centred, opposite the icon + text. Clicking runs the action and
   // dismisses the toast immediately.
@@ -289,7 +302,26 @@ function toast({ kind = "info", title, sub, ttlMs = 4000, action }) {
     el.appendChild(btn);
   }
   toaster.appendChild(el);
-  const timer = setTimeout(dismiss, ttlMs);
+  while (toaster.children.length > TOAST_MAX) toaster.firstElementChild.remove();
+  let timer = setTimeout(dismiss, ttlMs);
+  return el;
+}
+
+// ── Background event toasts ───────────────────────────────────────────────
+// The server queues anything that finishes while nobody is watching (a task
+// reporting back, a session exiting, a schedule firing). Each event is shown
+// exactly once: we remember the highest seq we've toasted, and the first load
+// only records the high-water mark so opening the app doesn't replay history.
+let lastEventSeq = -1;
+function drainEvents(events) {
+  if (!Array.isArray(events)) return;
+  const highest = events.reduce((m, e) => Math.max(m, e.seq || 0), 0);
+  if (lastEventSeq < 0) { lastEventSeq = highest; return; }   // first load
+  const fresh = events.filter((e) => (e.seq || 0) > lastEventSeq);
+  lastEventSeq = Math.max(lastEventSeq, highest);
+  for (const e of fresh.slice(-TOAST_MAX)) {
+    toast({ kind: e.kind || "info", title: e.title, sub: e.sub || undefined, ttlMs: 7000 });
+  }
 }
 
 // ── API ───────────────────────────────────────────────────────────────────
@@ -320,6 +352,7 @@ async function loadProjects() {
   openTaskEditorOnCreate = data.openTaskEditorOnCreate !== false;
   cardButtons = sanitizeCardButtons(data.cardButtons);
   projectOrders = data.projectOrders || {};
+  drainEvents(data.events);
   // Mirror to body attributes so CSS can globally suppress any rogue
   // badge element if the JS branch in buildCard / renderLanguages is ever
   // bypassed (e.g. future template paths that clone a card with a
@@ -432,6 +465,14 @@ function renderChips() {
   }
 }
 
+// Most recent of: an edit made inside the app, the project being opened from
+// its card, and the folder's own mtime. Used to order each status group on the
+// All page.
+function lastTouched(p) {
+  const t = (iso) => { const n = Date.parse(iso || ""); return Number.isFinite(n) ? n : 0; };
+  return Math.max(t(p.updatedAt), t(p.lastOpenedAt), Number(p.mtime) || 0);
+}
+
 // ── Render: card grid ─────────────────────────────────────────────────────
 // A poll / focus refresh landing mid-drag used to rebuild every card, which
 // detached the element under the cursor and silently killed the drag. Defer
@@ -471,14 +512,34 @@ function renderGrid() {
   // Each filter page has its own saved arrangement — sort by the active
   // filter's order list. Slugs not yet listed (status just flipped locally)
   // float to the top, matching the server's new-arrivals-on-top rule.
-  const pos = new Map((projectOrders[activeStatus] || []).map((s, i) => [s, i]));
-  // Pinned projects always float above everything else — on every filter
-  // page — while keeping their relative drag order among themselves.
-  filtered.sort((a, b) =>
-    ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) ||
-    ((pos.has(a.slug) ? pos.get(a.slug) : -1) -
-     (pos.has(b.slug) ? pos.get(b.slug) : -1))
-  );
+  if (activeStatus === "all") {
+    // The All page organises ITSELF: status groups in the order the status
+    // chips are configured (In Progress, then On Hold, then Done, …), and
+    // inside each group the most recently worked-on project first. "Worked on"
+    // is the latest of three signals — an edit made in the app, opening the
+    // project from its card, and the folder's own modified time — so a project
+    // you touched in your editor five minutes ago outranks one you last opened
+    // in the app last week.
+    //
+    // Per-status pages keep their hand-arranged order; that's where dragging
+    // lives. Pinned cards still come first everywhere.
+    const rank = new Map(statuses.map((st, i) => [st.id, i]));
+    filtered.sort((a, b) =>
+      ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) ||
+      ((rank.has(a.status) ? rank.get(a.status) : 99) -
+       (rank.has(b.status) ? rank.get(b.status) : 99)) ||
+      (lastTouched(b) - lastTouched(a))
+    );
+  } else {
+    const pos = new Map((projectOrders[activeStatus] || []).map((s, i) => [s, i]));
+    // Pinned projects always float above everything else while keeping their
+    // relative drag order among themselves.
+    filtered.sort((a, b) =>
+      ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) ||
+      ((pos.has(a.slug) ? pos.get(a.slug) : -1) -
+       (pos.has(b.slug) ? pos.get(b.slug) : -1))
+    );
+  }
 
   // Belt & braces for the scroll-jump fix above: snapshot the window scroll
   // and restore it in the same frame, so even a future layout read sneaking
@@ -638,6 +699,7 @@ const CARD_DRAG_HOLD_MS   = 260; // press-and-hold also arms the drag
 const CARD_EDGE_SCROLL    = 90;  // px band at the viewport edge that autoscrolls
 
 let cardPress = null;   // { el, project, pointerId, startX, startY, holdTimer }
+let lastAllDragHintAt = 0;
 let cardDrag  = null;   // live drag state
 
 // Anything the user can click inside a card must NOT start a drag.
@@ -651,6 +713,21 @@ grid.addEventListener("pointerdown", (e) => {
   if (e.target instanceof Element && e.target.closest(NO_DRAG_SELECTOR)) return;
   const project = projects.find((p) => p.slug === el.dataset.slug);
   if (!project) return;
+  if (activeStatus === "all") {
+    // All sorts itself; a drag here would snap straight back on the next
+    // render, which reads as the grid fighting you. Say why, once per press,
+    // and point at the two things that DO work here.
+    if (Date.now() - lastAllDragHintAt > 8000) {
+      lastAllDragHintAt = Date.now();
+      toast({
+        kind: "info",
+        title: "All arranges itself",
+        sub: "Sorted by status, then most recently worked on. Pin a card, or open a status tab to arrange by hand.",
+        ttlMs: 5000,
+      });
+    }
+    return;
+  }
   cardPress = {
     el, project, slug: el.dataset.slug,
     pointerId: e.pointerId,
@@ -1485,28 +1562,27 @@ async function openSessions(p) {
     if (r && r.focused > 0) {
       toast({
         kind: "info",
-        title: r.focused === 1 ? "Opened session terminal" : `Opened ${r.focused} session terminals`,
-        // Headless sessions have no window of their own, so we open a live
-        // log-tailing terminal instead of raising an existing window. The
-        // fallback flag means the server couldn't pin down this project's
-        // exact window and raised every running session terminal instead.
-        sub: r.fallback
-          ? "Couldn't match this project's window by name, so every running session terminal was raised."
-          : r.headless
-          ? "Showing live output from the background session(s)."
-          : "Brought the running session window(s) to the front.",
+        title: r.focused === 1 ? "Session window raised" : `${r.focused} session windows raised`,
+        // A headless session runs in a minimized window, so raising it is a
+        // restore — the session itself is never touched.
+        sub: r.headless
+          ? "Showing live output from the background session."
+          : "Brought to the front — the session keeps running either way.",
       });
-    } else if (r && r.headless) {
+    } else if (r && r.ended) {
+      // The registry says nothing is running for this project, so the badge is
+      // about to clear itself. Say that rather than "not found".
       toast({
         kind: "info",
-        title: "No live session output yet",
-        sub: "The background session may have just started or already finished — try again in a moment.",
+        title: "That session has finished",
+        sub: "Nothing is running for this project any more — the badge clears on the next refresh.",
       });
+      loadProjects().catch(() => {});
     } else {
       toast({
         kind: "info",
-        title: "No terminal windows found",
-        sub: "The session may have already finished or its window was closed.",
+        title: "Couldn't find the window",
+        sub: "The session is still running, but its terminal window couldn't be located to raise.",
       });
     }
   } catch (err) {
@@ -1758,7 +1834,7 @@ document.getElementById("task-image-replace")?.addEventListener("click", () => t
   let depth = 0;
   const setActive = (on) => {
     card.classList.toggle("is-drop-target", on);
-    taskImageEmpty?.classList.toggle("is-drop-target", on);
+    document.getElementById("task-image-drop")?.classList.toggle("is-drop-target", on);
   };
   const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
   card.addEventListener("dragenter", (e) => {
@@ -1810,6 +1886,61 @@ taskModal?.addEventListener("paste", async (e) => {
     }
   }
 });
+// Attach by NAME instead of by file: an http(s) image URL (downloaded) or a
+// path to an image already on this PC (copied). Same end state as an upload —
+// one file on disk the agent can read — so the preview path is identical.
+async function attachTaskImageFromSource(source) {
+  if (!editingTask) return;
+  const p = projects.find((x) => x.slug === editingTask.slug);
+  const t = p?.tasks?.find((x) => x.id === editingTask.id);
+  if (!p || !t) return;
+  const btn = document.getElementById("task-image-src-add");
+  const input = document.getElementById("task-image-src");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api(`/api/projects/${p.slug}/tasks/${t.id}/image/source`, {
+      method: "POST",
+      body: { source },
+    });
+    Object.assign(t, r.task);
+    renderTaskImage(p, t);
+    refreshCard(p.slug);
+    if (input) input.value = "";
+    toast({ kind: "success", title: "Image attached", sub: r.task?.image?.name || source });
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't attach image", sub: err.message });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+document.getElementById("task-image-src-add")?.addEventListener("click", () => {
+  const v = document.getElementById("task-image-src")?.value.trim();
+  if (v) attachTaskImageFromSource(v);
+});
+document.getElementById("task-image-src")?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const v = e.target.value.trim();
+  if (v) attachTaskImageFromSource(v);
+});
+// Browse fills the path box rather than uploading, so the row reads the same
+// way the Settings path rows do: pick, see the path, then Add.
+document.getElementById("task-image-pick")?.addEventListener("click", async () => {
+  try {
+    const r = await api("/api/dialog/pick-file", {
+      method: "POST",
+      body: { filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"] }] },
+    });
+    if (r?.path) {
+      const input = document.getElementById("task-image-src");
+      if (input) input.value = r.path;
+      await attachTaskImageFromSource(r.path);
+    }
+  } catch (err) {
+    toast({ kind: "error", title: "Couldn't open the picker", sub: err.message });
+  }
+});
+
 taskImageRemove?.addEventListener("click", async () => {
   if (!editingTask) return;
   const p = projects.find((x) => x.slug === editingTask.slug);
@@ -1932,11 +2063,13 @@ function buildCard(p) {
   const sessionBadge = node.querySelector(".card-session-badge");
   const sessionText  = node.querySelector(".card-session-text");
   if (sessionBadge && sessionText) {
-    const batches = new Set();
-    for (const t of p.tasks || []) {
-      if (t.status === "in-progress") batches.add(t.sentAt || "");
-    }
-    const n = batches.size + (p.liveSessions || 0);
+    // Count comes straight from the server's session registry, which is backed
+    // by real processes. It used to ALSO add one per distinct in-progress task
+    // batch, and that was the "says a session is active when it isn't" bug: a
+    // task left in-progress by a closed terminal or an app restart kept the
+    // badge lit for a session that no longer existed, and clicking it then
+    // reported "no session found" while the badge stayed put.
+    const n = p.liveSessions || 0;
     if (n === 0) {
       sessionBadge.hidden = true;
     } else {
@@ -1946,7 +2079,9 @@ function buildCard(p) {
         "aria-label",
         `${n} active terminal session${n === 1 ? "" : "s"} — click to open`
       );
-      sessionBadge.title = "Open this project's running terminal session windows";
+      sessionBadge.title = n === 1
+        ? "Bring this project's session window to the front"
+        : `Bring this project's ${n} session windows to the front`;
       sessionBadge.addEventListener("click", (e) => {
         e.stopPropagation();
         openSessions(p);
@@ -3191,33 +3326,27 @@ searchEl.addEventListener("input", (e) => {
 // Auto-refresh when the window regains focus (e.g., after dropping in a new project).
 window.addEventListener("focus", () => loadProjects().catch(() => {}));
 
-// ── Scan button ───────────────────────────────────────────────────────────
-// Re-runs the project scan against every folder in `scanPaths` and reports how
-// many *new* projects appeared since the last load. Existing projects keep
-// their stored status / notes — only the project list is refreshed.
-document.getElementById("btn-scan").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-scan");
-  if (btn.dataset.busy === "true") return;
-  btn.dataset.busy = "true";
-  const before = new Set(projects.map((p) => p.slug));
-  try {
-    await loadProjects();
-    const added = projects.filter((p) => !before.has(p.slug));
-    if (added.length === 0) {
-      toast({ kind: "info", title: "Scan complete", sub: "No new projects found." });
-    } else {
-      toast({
-        kind: "success",
-        title: `${added.length} new project${added.length === 1 ? "" : "s"} found`,
-        sub: added.slice(0, 3).map((p) => p.name).join(", ") + (added.length > 3 ? "…" : ""),
-      });
-    }
-  } catch (err) {
-    toast({ kind: "error", title: "Scan failed", sub: err.message });
-  } finally {
-    btn.dataset.busy = "false";
-  }
-});
+// ── Keeping the grid current (no manual Scan button) ──────────────────────
+// The header used to carry a Scan button. Every /api/projects response already
+// re-runs the folder scan, so the button only ever re-did what the next
+// refresh would do anyway — it was a placebo. It's gone, and these three
+// triggers cover everything it did:
+//
+//   1. window focus            — alt-tab back after adding/removing a folder
+//                                and the grid is correct before you look at it;
+//   2. the 8s task poll        — while any session is running;
+//   3. a 30s idle heartbeat    — so a folder added while the window is already
+//                                focused still appears on its own.
+//
+// All three funnel through loadProjects(), which is a full rescan server-side,
+// and all of them are skipped while the window is hidden, a dialog is open, a
+// card menu is open, a card is being dragged or the user is mid-scroll/typing
+// (taskPollTick's guards), so nothing repaints under the user's hands.
+const IDLE_RESCAN_MS = 30000;
+setInterval(() => {
+  if (taskPollTimer) return;          // the 8s poll already covers this
+  taskPollTick();
+}, IDLE_RESCAN_MS);
 
 // ── Settings modal ────────────────────────────────────────────────────────
 const settingsModal = document.getElementById("modal-settings");
@@ -3249,6 +3378,8 @@ function openSettings() {
       // ON unless opted out — naming a new task opens its editor so the
       // description / links / image can be added in the same breath.
       openTaskEditorOnCreate: cfg.openTaskEditorOnCreate !== false,
+      // Per-agent model override. Empty string = the CLI's own default.
+      taskModels: { claude: "", codex: "", ...(cfg.taskModels || {}) },
       // Which AI CLI the task send buttons launch. Claude unless opted out.
       taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
       // The three card action buttons ({ tool, mode? } each). The server
@@ -3261,11 +3392,34 @@ function openSettings() {
     cardBtnActiveSlot = 0;
     cardBtnActiveTab = VENDOR_TOOLS[settingsState.cardButtons[0].tool].group;
     renderSettings();
+    setSettingsTab("cards");
     settingsError("");
     settingsModal.style.display = "";
     settingsModal.classList.add("is-open");
   }).catch((err) => toast({ kind: "error", title: "Couldn't load settings", sub: err.message }));
 }
+// ── Settings tabs ─────────────────────────────────────────────────────────
+// One panel visible at a time. The card-buttons editor measures its slot cards
+// when it renders, so switching INTO the Cards tab repaints it — otherwise it
+// would have laid itself out while hidden (zero width).
+let settingsTab = "cards";
+function setSettingsTab(tab) {
+  settingsTab = tab;
+  document.querySelectorAll(".settings-tab").forEach((b) =>
+    b.setAttribute("aria-selected", String(b.dataset.tab === tab))
+  );
+  document.querySelectorAll(".settings-panel").forEach((pnl) => {
+    pnl.hidden = pnl.dataset.panel !== tab;
+  });
+  const body = document.querySelector(".settings-body");
+  if (body) body.scrollTop = 0;
+  if (tab === "cards" && settingsState) renderCardButtonsEditor();
+}
+document.querySelector(".settings-tabs")?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".settings-tab");
+  if (btn) setSettingsTab(btn.dataset.tab);
+});
+
 function closeSettings() {
   settingsModal.classList.remove("is-open");
   settingsModal.style.display = "none";
@@ -3298,6 +3452,56 @@ document.getElementById("set-headless-terminals")?.addEventListener("change", (e
 document.getElementById("set-open-task-editor")?.addEventListener("change", (e) => {
   if (settingsState) settingsState.openTaskEditorOnCreate = e.target.checked;
 });
+// ── Agent model picker ────────────────────────────────────────────────────
+// Which model the chosen agent runs. "Default" sends no --model flag at all,
+// so the CLI keeps whatever it is already configured with — that stays the
+// out-of-the-box behaviour. The list is per-agent because the two CLIs take
+// completely different model ids.
+const AGENT_MODELS = {
+  claude: [
+    { value: "", label: "Default (CLI setting)" },
+    { value: "claude-opus-5", label: "Opus 5 — most capable" },
+    { value: "claude-sonnet-5", label: "Sonnet 5 — balanced" },
+    { value: "claude-haiku-4-5", label: "Haiku 4.5 — fastest" },
+  ],
+  codex: [
+    { value: "", label: "Default (CLI setting)" },
+    { value: "gpt-5-codex", label: "gpt-5-codex" },
+    { value: "gpt-5", label: "gpt-5" },
+  ],
+};
+function renderTaskModelSelect() {
+  const sel = document.getElementById("set-task-model");
+  if (!sel || !settingsState) return;
+  const agent = settingsState.taskAgent === "codex" ? "codex" : "claude";
+  const list = AGENT_MODELS[agent] || AGENT_MODELS.claude;
+  const current = settingsState.taskModels?.[agent] || "";
+  sel.textContent = "";
+  // A model saved by hand (or by a newer build) that isn't in the list still
+  // shows, rather than silently resetting to Default on the next save.
+  const known = new Set(list.map((m) => m.value));
+  const rows = known.has(current) ? list : [...list, { value: current, label: current }];
+  for (const m of rows) {
+    const o = document.createElement("option");
+    o.value = m.value;
+    o.textContent = m.label;
+    sel.appendChild(o);
+  }
+  sel.value = current;
+  sel._cdSync?.();
+  const help = document.getElementById("set-model-help");
+  if (help) {
+    help.textContent = agent === "codex"
+      ? "Which model Codex runs. Default uses the CLI's own setting."
+      : "Which model Claude Code runs. Default uses the CLI's own setting.";
+  }
+}
+document.getElementById("set-task-model")?.addEventListener("change", (e) => {
+  if (!settingsState) return;
+  const agent = settingsState.taskAgent === "codex" ? "codex" : "claude";
+  settingsState.taskModels = { ...settingsState.taskModels, [agent]: e.target.value };
+});
+
 // Task agent segment — which CLI the per-task send buttons launch. Same
 // slide-segment pattern as the publish modal's visibility control.
 function setTaskAgentSegment(v) {
@@ -3313,6 +3517,7 @@ document.getElementById("set-task-agent")?.addEventListener("click", (e) => {
   const opt = e.target.closest(".gh-vis-opt");
   if (!opt) return;
   if (settingsState) settingsState.taskAgent = opt.dataset.value === "codex" ? "codex" : "claude";
+  renderTaskModelSelect();
   setTaskAgentSegment(opt.dataset.value);
 });
 // ── Card-buttons editor (Settings → "Card buttons") ───────────────────────
@@ -3460,6 +3665,7 @@ function renderSettings() {
   if (openEditorEl) openEditorEl.checked = !!settingsState.openTaskEditorOnCreate;
   // Task agent segment
   setTaskAgentSegment(settingsState.taskAgent);
+  renderTaskModelSelect();
   // Card-buttons editor (slots + tabs + tiles)
   renderCardButtonsEditor();
 
@@ -3753,6 +3959,7 @@ document.getElementById("set-save").addEventListener("click", async () => {
     showLanguageBadges: !!settingsState.showLanguageBadges,
     headlessTerminals: !!settingsState.headlessTerminals,
     openTaskEditorOnCreate: !!settingsState.openTaskEditorOnCreate,
+    taskModels: settingsState.taskModels,
     taskAgent: settingsState.taskAgent === "codex" ? "codex" : "claude",
     cardButtons: sanitizeCardButtons(settingsState.cardButtons),
     // Legacy mirrors of the slot modes — other server paths (and any older
@@ -3858,6 +4065,7 @@ function addSchedProject() {
   if (!schedSelectedSlugs.includes(slug)) {
     schedSelectedSlugs.push(slug);
     renderSchedProjectChips();
+    renderScheduleProjectSelect();
   }
   schedErrorEl.textContent = "";
 }
@@ -3918,15 +4126,26 @@ function refreshScheduleHint() {
 function renderScheduleProjectSelect(selectedSlug) {
   schedProjectSel.textContent = "";
   const have = new Set();
-  const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
+  const added = new Set(schedSelectedSlugs);
+  const sorted = [...projects]
+    .filter((p) => p.status !== "archived")
+    .sort((a, b) => a.name.localeCompare(b.name));
+  // Projects already attached stay in the list but are greyed and labelled,
+  // so it's obvious why picking one again does nothing — and the first
+  // selectable entry is pre-chosen so Add always does something useful.
+  let firstFree = "";
   for (const p of sorted) {
     const o = document.createElement("option");
     o.value = p.slug;
-    o.textContent = p.name;
+    o.textContent = added.has(p.slug) ? `${p.name} — already added` : p.name;
+    o.disabled = added.has(p.slug);
     schedProjectSel.appendChild(o);
     have.add(p.slug);
+    if (!o.disabled && !firstFree) firstFree = p.slug;
   }
   if (selectedSlug && have.has(selectedSlug)) schedProjectSel.value = selectedSlug;
+  else if (firstFree) schedProjectSel.value = firstFree;
+  schedProjectSel._cdSync?.();
 }
 
 function resetScheduleForm() {
@@ -4253,6 +4472,173 @@ if (winApi) {
   winApi.isMaximized?.().then(setMaxState).catch(() => {});
   winApi.onMaximizeChanged?.(setMaxState);
 }
+
+// ── Branded dropdowns ─────────────────────────────────────────────────────
+// A native <select> paints its popup with the OPERATING SYSTEM's widget — a
+// white Windows list in the middle of a dark violet app. No amount of CSS
+// reaches inside it. So every <select> here is upgraded in place: the real
+// element stays in the DOM as the value (every existing read of `.value`,
+// every `change` listener and every form-fill keeps working untouched) and a
+// styled button + listbox is rendered over it.
+//
+// Long lists (the project picker) get a filter box automatically, so picking
+// one project out of forty is typing two letters rather than scrolling.
+const CD_SELECT_FILTER_MIN = 8;   // options before a filter box appears
+
+function upgradeSelect(sel) {
+  if (!sel || sel._cdUpgraded || sel.multiple) return;
+  sel._cdUpgraded = true;
+
+  const wrap = document.createElement("div");
+  wrap.className = "cdsel";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "cdsel-btn";
+  btn.setAttribute("aria-haspopup", "listbox");
+  btn.setAttribute("aria-expanded", "false");
+  const label = document.createElement("span");
+  label.className = "cdsel-label";
+  const caret = document.createElement("span");
+  caret.className = "cdsel-caret";
+  caret.setAttribute("aria-hidden", "true");
+  caret.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  btn.append(label, caret);
+
+  const pop = document.createElement("div");
+  pop.className = "cdsel-pop";
+  pop.setAttribute("role", "listbox");
+  pop.hidden = true;
+  const filter = document.createElement("input");
+  filter.className = "cdsel-filter";
+  filter.type = "text";
+  filter.placeholder = "Type to filter…";
+  filter.autocomplete = "off";
+  filter.spellcheck = false;
+  const list = document.createElement("div");
+  list.className = "cdsel-list";
+  const empty = document.createElement("div");
+  empty.className = "cdsel-empty";
+  empty.textContent = "No matches";
+  empty.hidden = true;
+  pop.append(filter, list, empty);
+
+  sel.parentNode.insertBefore(wrap, sel);
+  wrap.append(sel, btn, pop);
+  if (sel.id) btn.id = sel.id + "-btn";
+  if (sel.disabled) btn.disabled = true;
+
+  const syncLabel = () => {
+    const opt = sel.options[sel.selectedIndex];
+    label.textContent = opt ? opt.textContent : "";
+    label.dataset.placeholder = opt && opt.value === "" ? "true" : "false";
+  };
+
+  const buildRows = () => {
+    list.textContent = "";
+    [...sel.options].forEach((opt, i) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "cdsel-opt";
+      row.setAttribute("role", "option");
+      row.dataset.index = String(i);
+      row.textContent = opt.textContent;
+      row.setAttribute("aria-selected", String(i === sel.selectedIndex));
+      if (opt.disabled) row.disabled = true;
+      row.addEventListener("click", () => {
+        sel.selectedIndex = i;
+        // Dispatch on the real <select> so every existing listener fires
+        // exactly as it did with the native widget.
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        syncLabel();
+        close();
+        btn.focus();
+      });
+      list.appendChild(row);
+    });
+    filter.hidden = sel.options.length < CD_SELECT_FILTER_MIN;
+    applyFilter();
+  };
+
+  const applyFilter = () => {
+    const q = filter.hidden ? "" : filter.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of list.children) {
+      const hit = !q || row.textContent.toLowerCase().includes(q);
+      row.hidden = !hit;
+      if (hit) shown++;
+    }
+    empty.hidden = shown > 0;
+  };
+  filter.addEventListener("input", applyFilter);
+
+  const close = () => {
+    if (pop.hidden) return;
+    pop.hidden = true;
+    wrap.classList.remove("is-open");
+    btn.setAttribute("aria-expanded", "false");
+  };
+  const open = () => {
+    if (!pop.hidden || btn.disabled) return;
+    closeAllSelects();
+    buildRows();
+    pop.hidden = false;
+    wrap.classList.add("is-open");
+    btn.setAttribute("aria-expanded", "true");
+    // Drop upward when there isn't room below — the schedule form's Agent
+    // picker sits near the bottom of a scrolling dialog.
+    const r = btn.getBoundingClientRect();
+    wrap.classList.toggle("drop-up", window.innerHeight - r.bottom < 240 && r.top > 260);
+    filter.value = "";
+    applyFilter();
+    if (!filter.hidden) filter.focus();
+    list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  };
+
+  btn.addEventListener("click", (e) => { e.stopPropagation(); pop.hidden ? open() : close(); });
+  btn.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+  });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); btn.focus(); }
+  });
+
+  // Code that sets `.value` or refills `<option>`s (renderScheduleProjectSelect,
+  // fillScheduleForm, …) must repaint the button. A native select updates
+  // itself; ours needs telling, so watch both paths.
+  sel.addEventListener("change", syncLabel);
+  new MutationObserver(syncLabel).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ["value", "selected", "disabled"] });
+  sel._cdSync = syncLabel;
+  syncLabel();
+}
+
+function closeAllSelects(except) {
+  document.querySelectorAll(".cdsel.is-open").forEach((w) => {
+    if (w === except) return;
+    w.classList.remove("is-open");
+    w.querySelector(".cdsel-pop").hidden = true;
+    w.querySelector(".cdsel-btn")?.setAttribute("aria-expanded", "false");
+  });
+}
+document.addEventListener("click", (e) => {
+  if (e.target instanceof Element && e.target.closest(".cdsel")) return;
+  closeAllSelects();
+}, true);
+
+// Upgrade what's in the document now, and anything added later (the settings
+// and schedule dialogs build rows on demand).
+function upgradeAllSelects(root = document) {
+  root.querySelectorAll("select:not([multiple])").forEach(upgradeSelect);
+}
+upgradeAllSelects();
+new MutationObserver((records) => {
+  for (const r of records) {
+    for (const n of r.addedNodes) {
+      if (!(n instanceof Element)) continue;
+      if (n.tagName === "SELECT") upgradeSelect(n);
+      else upgradeAllSelects(n);
+    }
+  }
+}).observe(document.body, { childList: true, subtree: true });
 
 // ── Initial load ──────────────────────────────────────────────────────────
 loadProjects().catch((err) => {

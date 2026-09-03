@@ -1,5 +1,20 @@
 /* Coding Drives — extends Cleanera Made design system tokens. */
 
+/* ── Text colour ───────────────────────────────────────────────────────────
+   The design system ships --fg-1 at #fafafa. Against the #131316 page that is
+   roughly 18:1 — technically excellent, but on a dark UI you look at all day
+   it glares, and the display-weight headings (Bricolage 700) glare hardest
+   because more pixels are lit. These knock the top of the ramp back to a
+   soft off-white: still ~15:1, comfortably past AAA, with the harsh edge off.
+   Everything else in the app reads through these tokens, so one change here
+   covers every screen — cards, dialogs, toasts, the schedule and settings
+   forms. Values only shift the two brightest steps; the muted greys are
+   already easy and stay put so hierarchy is unchanged. */
+:root {
+  --fg-1: #e7e7ec;   /* was #fafafa — primary text + headings */
+  --fg-2: #c4c4cd;   /* was #d4d4d8 — secondary text */
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 
@@ -158,6 +173,27 @@ body {
   letter-spacing: var(--tracking-tight);
   color: var(--fg-1);
   margin: 4px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+/* Coding Drives is one tool inside the wider Megami family, so the title
+   carries the parent brand — quiet enough that the product name still leads. */
+.brand-by {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+.brand-by::before {
+  content: "";
+  display: inline-block;
+  width: 1px; height: 11px;
+  margin-right: 9px;
+  vertical-align: -1px;
+  background: var(--border);
 }
 
 .kpi-row {
@@ -1280,6 +1316,20 @@ body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
 }
 /* Empty state is a real drop zone, not a lone small button: a dashed panel
    you can drag a file onto, with Browse for the file picker. */
+/* Empty state = drop zone, a labelled divider, then the link/path row. */
+.task-image-empty { display: flex; flex-direction: column; gap: 10px; }
+.task-image-empty[hidden] { display: none; }
+/* "or point at one" — a centred caption with a rule running out either side,
+   so the two ways of attaching read as alternatives rather than a stack. */
+.task-image-or {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--fg-4);
+}
+.task-image-or::before, .task-image-or::after {
+  content: ""; flex: 1 1 auto; height: 1px; background: var(--border);
+}
 .task-image-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px;
@@ -1432,36 +1482,86 @@ body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
 .toaster {
   position: fixed;
   right: 24px; bottom: 24px;
-  display: flex; flex-direction: column; gap: 8px;
-  z-index: 50;
+  display: flex; flex-direction: column; gap: 10px;
+  /* ABOVE every overlay. At z-index 50 a toast fired while a dialog was open
+     was painted behind the modal's blurred backdrop — visible as a smudge and
+     unreadable. Modals sit at 100, the image lightbox at 200; notifications
+     are the topmost layer in the app by definition. */
+  z-index: 400;
   pointer-events: none;
 }
 .toast {
+  position: relative;
   pointer-events: auto;
   display: grid;
-  grid-template-columns: 32px 1fr;
+  grid-template-columns: 34px 1fr auto;
   align-items: center;
   gap: 12px;
-  /* (a third auto column appears when the toast carries an action button —
-     see .toast:has(.toast-action) below) */
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--brand-500);
-  border-radius: var(--radius-md);
-  padding: 9px 18px 9px 14px;
-  min-width: 320px;
+  /* Solid, not translucent. A toast now paints on top of a blurred modal
+     backdrop, and a glassy panel over an already-blurred surface turned the
+     text to mush. */
+  background: var(--surface-solid);
+  border: 1px solid var(--ring);
+  border-radius: var(--radius-lg);
+  padding: 11px 12px 11px 13px;
+  min-width: 330px;
   max-width: 460px;
   font-size: 13px;
   color: var(--fg-1);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  /* Base elevation only — the per-kind data-* selectors below layer a
-     softer colored second shadow that matches the semantic accent. Used
-     to be 0.40 alpha here on the base; that was the loudest violet in the
-     file and read as a halo before any kind was applied. */
-  box-shadow: var(--shadow-lg);
-  animation: slide-in 220ms var(--ease-out);
+  overflow: hidden;
+  box-shadow: 0 20px 44px -16px rgba(0,0,0,0.75), 0 2px 8px -2px rgba(0,0,0,0.5);
+  animation: toast-in 260ms var(--ease-out);
 }
+@keyframes toast-in {
+  from { transform: translateX(16px) scale(0.98); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+.toast.is-leaving {
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+  opacity: 0;
+  transform: translateX(16px) scale(0.98);
+}
+/* The old 3px slab down the left edge was the loudest thing on the toast and
+   fought the coloured icon tile beside it for the same job. The accent now
+   lives in the icon tile and in a hairline countdown along the bottom, which
+   also tells you how long the toast has left. */
+.toast-timer {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: rgba(255,255,255,0.06);
+}
+.toast-timer i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--toast-accent, var(--brand-500));
+  animation-name: toast-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@keyframes toast-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.toast.is-held .toast-timer i { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+  .toast-timer i { animation: none; }
+}
+.toast-close {
+  align-self: start;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  padding: 0;
+  color: var(--fg-4);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-out), color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.toast:hover .toast-close, .toast-close:focus-visible { opacity: 1; }
+.toast-close:hover { color: var(--fg-1); background: var(--surface-2); }
 .toast-body { min-width: 0; }
 .toast .t-title { font-weight: 600; margin: 0; line-height: 1.3; }
 /* Sub stays on a single line — never wraps to two — so every toast reads at a
@@ -1469,8 +1569,9 @@ body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
 .toast .t-sub   { color: var(--fg-3); font-size: 12px; line-height: 1.4; margin-top: 2px; white-space: nowrap; }
 
 .toast-icon {
-  width: 32px; height: 32px;
-  border-radius: 10px;
+  width: 34px; height: 34px;
+  border-radius: 11px;
+  align-self: start;
   display: inline-flex;
   align-items: center; justify-content: center;
   flex-shrink: 0;
@@ -1479,7 +1580,7 @@ body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
 
 /* Action button (e.g. Undo) — far right, vertically centred, opposite the
    icon + text. The grid grows a third column to seat it. */
-.toast:has(.toast-action) { grid-template-columns: 32px 1fr auto; }
+.toast:has(.toast-action) { grid-template-columns: 34px 1fr auto auto; }
 .toast-action {
   font: inherit; font-size: 12px; font-weight: 700;
   color: var(--brand-300);
@@ -1495,16 +1596,16 @@ body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
 /* Per-kind colored glow is softened from 0.45 → 0.20 — the previous strength
    read as the same halo pattern we removed from CTAs. At 0.20 the semantic
    color still tints the ambient under each toast without dominating. */
-.toast[data-kind="info"] { border-left-color: var(--brand-500); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(106, 77, 255, 0.20); }
+.toast[data-kind="info"] { --toast-accent: var(--brand-500); box-shadow: 0 20px 44px -16px rgba(0,0,0,0.75), 0 10px 30px -14px rgba(106, 77, 255, 0.20); }
 .toast[data-kind="info"] .toast-icon { background: rgba(106, 77, 255, 0.18); color: var(--brand-300); }
 
-.toast[data-kind="success"] { border-left-color: var(--success); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(52, 211, 153, 0.20); }
+.toast[data-kind="success"] { --toast-accent: var(--success); box-shadow: 0 20px 44px -16px rgba(0,0,0,0.75), 0 10px 30px -14px rgba(52, 211, 153, 0.20); }
 .toast[data-kind="success"] .toast-icon { background: var(--success-soft); color: var(--success); }
 
-.toast[data-kind="error"]   { border-left-color: var(--danger);  box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(248, 113, 113, 0.20); }
+.toast[data-kind="error"]   { --toast-accent: var(--danger); box-shadow: 0 20px 44px -16px rgba(0,0,0,0.75), 0 10px 30px -14px rgba(248, 113, 113, 0.20); }
 .toast[data-kind="error"]   .toast-icon { background: var(--danger-soft);  color: var(--danger); }
 
-.toast[data-kind="warning"] { border-left-color: var(--warning); box-shadow: var(--shadow-lg), 0 10px 28px -12px rgba(251, 191, 36, 0.20); }
+.toast[data-kind="warning"]   { --toast-accent: var(--warning); box-shadow: 0 20px 44px -16px rgba(0,0,0,0.75), 0 10px 30px -14px rgba(251, 191, 36, 0.20); }
 .toast[data-kind="warning"] .toast-icon { background: var(--warning-soft); color: var(--warning); }
 
 @keyframes slide-in {
@@ -1550,6 +1651,53 @@ body:has(.modal.is-open) { overflow: hidden; }
 }
 .modal-lg .modal-card { width: min(640px, 100%); }
 .settings-body { overflow-y: auto; }
+
+/* ── Settings tabs ─────────────────────────────────────────────────────────
+   A left-to-right strip under the dialog title. Each tab owns the full width
+   of the body, so a wide control (the card-buttons builder) never has to share
+   a row with a one-line toggle and the padding stays identical on both sides. */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-tab {
+  flex: 1 1 0;
+  position: relative;
+  padding: 10px 8px 12px;
+  font: inherit; font-size: 12px; font-weight: 600;
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.settings-tab:hover { color: var(--fg-1); background: var(--surface-2); }
+.settings-tab[aria-selected="true"] { color: var(--brand-300); }
+/* Underline sits ON the border so the selected tab reads as connected to the
+   panel below it. */
+.settings-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand-500);
+}
+.settings-tab:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: -2px; }
+
+/* One panel at a time; sections inside it stack full-width. */
+.settings-panel { display: flex; flex-direction: column; gap: 20px; }
+.settings-panel[hidden] { display: none; }
+/* Every control in a section spans the panel, so nothing is centred against
+   empty space waiting for a neighbour that lives in another tab. */
+.settings-panel .settings-section > * { width: 100%; }
+.settings-panel .cardbtn-slots,
+.settings-panel .cardbtn-tabs,
+.settings-panel .cardbtn-grid { margin-left: 0; margin-right: 0; }
 @keyframes modal-in {
   from { transform: translateY(8px); opacity: 0; }
   to   { transform: translateY(0);   opacity: 1; }
@@ -2462,6 +2610,92 @@ body:has(.modal.is-open) { overflow: hidden; }
 .gh-field select:focus { border-color: rgba(255,255,255,0.18); background-color: var(--surface-3); }
 .cd-input::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
 
+/* ── Branded dropdown ──────────────────────────────────────────────────────
+   A native <select> renders its popup with the OS widget — a white Windows
+   list dropped into a dark violet app, which no CSS can reach. upgradeSelect()
+   (app.js) keeps the real <select> as the value and paints this over it, so
+   the open menu finally matches the rest of the app. */
+.cdsel { position: relative; width: 100%; }
+.cdsel > select { display: none; }
+.cdsel-btn {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 11px;
+  font: inherit; font-size: 13px;
+  text-align: left;
+  color: var(--fg-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.cdsel-btn:hover { background: var(--surface-3); }
+.cdsel-btn:focus-visible { outline: none; border-color: var(--ring-brand); }
+.cdsel-btn:disabled { opacity: 0.5; cursor: default; }
+.cdsel.is-open .cdsel-btn { border-color: var(--ring-brand); background: var(--surface-3); }
+.cdsel-label {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cdsel-label[data-placeholder="true"] { color: var(--fg-4); }
+.cdsel-caret { flex: none; display: inline-flex; color: var(--fg-3); transition: transform var(--dur) var(--ease-out); }
+.cdsel.is-open .cdsel-caret { transform: rotate(180deg); }
+
+.cdsel-pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0; right: 0;
+  display: flex; flex-direction: column;
+  max-height: 264px;
+  padding: 6px;
+  background: var(--surface-solid);
+  border: 1px solid var(--ring);
+  border-radius: var(--radius-md);
+  box-shadow: 0 18px 44px -12px rgba(0,0,0,0.7);
+}
+.cdsel.drop-up .cdsel-pop { top: auto; bottom: calc(100% + 6px); }
+.cdsel-pop[hidden] { display: none; }
+.cdsel-filter {
+  flex: none;
+  margin-bottom: 6px;
+  padding: 7px 9px;
+  font: inherit; font-size: 12px;
+  color: var(--fg-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+.cdsel-filter:focus { border-color: var(--ring-brand); }
+.cdsel-filter[hidden] { display: none; }
+.cdsel-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.cdsel-opt {
+  display: block; width: 100%;
+  padding: 8px 10px;
+  font: inherit; font-size: 13px;
+  text-align: left;
+  color: var(--fg-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cdsel-opt[hidden] { display: none; }
+.cdsel-opt:hover { background: var(--surface-2); color: var(--fg-1); }
+.cdsel-opt[aria-selected="true"] {
+  background: var(--tile-violet-bg);
+  border-color: var(--ring-brand);
+  color: var(--brand-300);
+  font-weight: 600;
+}
+.cdsel-opt:disabled { opacity: 0.4; cursor: default; }
+.cdsel-empty { padding: 10px; font-size: 12px; color: var(--fg-4); text-align: center; }
+.cdsel-empty[hidden] { display: none; }
+
 /* Reference-link chip editor (Edit task / Schedule). Reuses the .path-list /
    .path-item pills so adding links reads exactly like adding scan paths. Tighten
    the inherited bottom margin (the parent .gh-field already spaces the rows) and
@@ -2613,11 +2847,22 @@ body:has(.modal.is-open) { overflow: hidden; }
   background: color-mix(in srgb, #f5b45c 7%, var(--surface-2));
 }
 .schedule-important svg { color: #f5b45c; flex: none; margin-top: 1px; }
-.schedule-important p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--fg-2); }
+.schedule-important p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--fg-1); }
+.schedule-important-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; line-height: 1.5;
+  color: var(--fg-2);
+}
+.schedule-important-list li::marker { color: var(--fg-4); }
+/* The note is a column now (headline + list), not a single wrapped line. */
+.schedule-important > div { min-width: 0; }
 .schedule-important strong { color: var(--fg-1); }
 .schedule-important em { font-style: normal; color: var(--fg-1); }
 
 /* The multi-project picker's select shares the input row with its Add button —
    let it stretch like the link input does. */
-.modal-input-row .cd-select { flex: 1; min-width: 0; }
+.modal-input-row .cd-select,
+.modal-input-row .cdsel { flex: 1; min-width: 0; }
 

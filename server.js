@@ -1070,7 +1070,15 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
   // Drop any interactive Claude/Codex sessions whose terminal has been closed
   // before we compute per-card session counts, so a card's badge clears the
   // next time the dashboard fetches after the user exits the terminal.
-  await pruneInteractiveSessions();
+  // Reconcile the session registry against real processes BEFORE anything
+  // reads it, so the badge count in this response is current. Any session that
+  // died is settled here too — its unreported tasks stop spinning instead of
+  // waiting out the 2-hour staleness sweep.
+  const diedSessions = await reconcileSessions();
+  if (diedSessions.length) {
+    await settleTasksForDeadSessions(diedSessions);
+    db = await readDB();
+  }
   // Lazy staleness sweep — runs on every fetch (refresh, focus, poll), so a
   // task stuck blinking after a dead/failed session resolves itself to
   // "failed" the next time the dashboard looks at it.
@@ -1119,9 +1127,15 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
       lastBackedUpDest,
       lastBackedUpExists,
       updatedAt: db[p.slug]?.updatedAt || null,
-      // Interactive Claude/Codex terminals open from this card (see
-      // liveInteractiveSessions) — folded into the card's session badge count.
-      liveSessions: liveInteractiveCount(p.slug),
+      // Last time this project was opened from a card (any tool). Together
+      // with updatedAt and the folder mtime this is what the All page means
+      // by "most recently worked on".
+      lastOpenedAt: db[p.slug]?.lastOpenedAt || null,
+      // Every live terminal session for this project — task sends AND the
+      // interactive terminals opened from the card's buttons. Backed by real
+      // processes (see the session registry), so the badge can't outlive the
+      // window it points at, and can't miss one that survived a restart.
+      liveSessions: liveSessionCount(p.slug),
     };
   });
   // Per-filter sticky card order. Each filter page ("all" + every status)
@@ -1187,6 +1201,9 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
     // description / links / reference image can be added in the same breath.
     // Defaults ON — it's the flow the app shipped with originally.
     openTaskEditorOnCreate: cfg.openTaskEditorOnCreate !== false,
+    // Per-agent model override (Settings → Tasks → Model). Empty = the CLI's
+    // own default.
+    taskModels: cfg.taskModels || {},
     // The three card action buttons (Settings → "Card buttons"): each slot
     // is { tool, mode? } — the frontend paints the buttons from this and
     // passes the slot's mode back when opening, so Claude/Codex buttons know
@@ -1195,6 +1212,9 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
     // Per-filter drag-and-drop arrangements — the client sorts the grid by
     // the active filter's list.
     projectOrders: orders,
+    // Background things that finished since the app started. The dashboard
+    // toasts anything newer than the highest seq it has already shown.
+    events: appEvents,
   });
 }));
 
@@ -1623,6 +1643,9 @@ app.post("/api/projects/:slug/tasks/send", async (req, res) => {
     spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, sent, cfg.port), cliKey, {
       headless: cfg.headlessTerminals === true,
       slug,
+      // The session owns these tasks: if it dies without reporting, they are
+      // settled rather than left spinning until the staleness sweep.
+      taskIds: sent.map((t) => t.id),
     });
     res.json({ ok: true, cli: cliKey, count: sent.length });
   } catch (err) {
@@ -1643,56 +1666,65 @@ app.post("/api/projects/:slug/tasks/send", async (req, res) => {
 // We try the headless path first when headless is on; if no live logs are found
 // we still fall back to raising any stray visible windows, so the button always
 // does the most useful thing it can.
-app.post("/api/sessions/open", (_req, res) => {
-  try {
-    // Headless sessions now run as REAL (minimized) Windows Terminal windows,
-    // so raising them is the same path as visible sessions — restore + focus.
-    // Fall back to the live-log tail for any legacy windowless session that
-    // might still be running — unconditionally, not gated on the current
-    // headless setting: the logs on disk are the ground truth, and the toggle
-    // may have been flipped since those sessions started.
-    const focused = focusTerminalWindows();
-    if (focused > 0) return res.json({ ok: true, focused });
-    const opened = openHeadlessSessionTerminals();
-    if (opened > 0) return res.json({ ok: true, headless: true, focused: opened });
-    res.json({ ok: true, focused });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
-  }
-});
+app.post("/api/sessions/open", asyncRoute(async (_req, res) => {
+  // Headless sessions run as REAL (minimized) Windows Terminal windows, so
+  // raising them is the same path as visible ones: restore + focus. The
+  // live-log tail is the fallback for any legacy windowless session — not
+  // gated on the current headless setting, because the logs on disk are the
+  // ground truth and the toggle may have flipped since they started.
+  await reconcileSessions();
+  const focused = focusTerminalWindows();
+  if (focused > 0) return res.json({ ok: true, focused });
+  const opened = openHeadlessSessionTerminals();
+  if (opened > 0) return res.json({ ok: true, headless: true, focused: opened });
+  res.json({ ok: true, focused });
+}));
 
 // Per-project variant of the above — a card's "N Session(s)" badge calls THIS
 // so it opens only the terminals belonging to that project, not every running
 // session. Visible windows are matched by their title (the project's folder
 // basename, set in spawnAiPrompt); headless logs are matched by slug.
-app.post("/api/projects/:slug/sessions/open", (req, res) => {
+// Per-project variant — a card's "N Session(s)" badge calls THIS so it raises
+// only the terminals belonging to that project.
+//
+// Targeting is by WINDOW, resolved from each live session's own Windows
+// Terminal process, not by title. That is what fixes "I have three terminals
+// open and it raises the wrong one": a title match takes whatever answers
+// first, whereas the session registry knows which window each of THIS
+// project's sessions is actually running in — so two sessions raise two
+// windows, and a minimized (background) session is restored in place without
+// disturbing the session itself.
+app.post("/api/projects/:slug/sessions/open", asyncRoute(async (req, res) => {
   const slug = req.params.slug;
   let folder = "";
   try { folder = fromSlug(slug); } catch {}
   const titleNeedle = folder ? path.basename(folder) : "";
-  try {
-    // Headless sessions are now real (minimized) wt windows titled with the
-    // project basename, so the same title-matched raise works for them — restore
-    // this project's minimized session(s). The tracked window handles cover
-    // sessions whose tab the CLI renamed past recognition.
-    const focused = focusTerminalWindows(titleNeedle, sessionWindowHandles(slug));
-    if (focused > 0) return res.json({ ok: true, focused });
-    // Legacy windowless sessions live-tail their on-disk log. Not gated on the
-    // current headless setting — the logs are the ground truth.
-    const opened = openHeadlessSessionTerminals(slug);
-    if (opened > 0) return res.json({ ok: true, headless: true, focused: opened });
-    // Still nothing? The badge only shows when something IS running, so an
-    // empty result here almost always means the session's window answers to a
-    // title we couldn't predict. Raise every running terminal window rather
-    // than telling the user "no terminals found" while their session sits in
-    // one of them — `fallback` lets the toast say what happened.
-    const all = focusTerminalWindows();
-    if (all > 0) return res.json({ ok: true, focused: all, fallback: true });
-    res.json({ ok: true, focused: 0 });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
-  }
-});
+
+  // Fresh reconcile first: the click must act on what is running NOW, not on
+  // a count cached seconds ago.
+  const died = await reconcileSessions();
+  if (died.length) await settleTasksForDeadSessions(died);
+
+  const live = liveSessionsFor(slug);
+
+  // Raise by TAB, matched on the project's folder name. Every session we launch
+  // now pins that tab title (--suppressApplicationTitle), so the match names
+  // this project's sessions and nothing else — including when several sessions
+  // share one tabbed window, and including a minimized "background" session,
+  // which is restored in place without the process inside it noticing.
+  const focused = focusTerminalWindows(titleNeedle);
+  if (focused > 0) return res.json({ ok: true, focused, sessions: live.length });
+
+  // Windowless legacy sessions live-tail their on-disk log. Not gated on the
+  // current headless setting — the logs are the ground truth.
+  const opened = openHeadlessSessionTerminals(slug);
+  if (opened > 0) return res.json({ ok: true, headless: true, focused: opened, sessions: live.length });
+
+  // Nothing found. With the registry driving the badge this now means the
+  // session really has ended, and the badge clears on the next refresh — so
+  // say that plainly instead of raising unrelated terminals.
+  res.json({ ok: true, focused: 0, sessions: live.length, ended: live.length === 0 });
+}));
 
 // Reorder — body: { order: [taskId, …] } listing EVERY task id in the new
 // order (drag-and-drop on the card). Set-equality is enforced so a stale
@@ -1962,10 +1994,12 @@ async function applyTaskReport(res, { slug, taskId, status, note }) {
   }
   const now = new Date().toISOString();
   let found = false;
+  let reportedTitle = "";
   await updateDB((db) => {
     const t = (db[slug]?.tasks || []).find((t) => t.id === taskId);
     if (!t) return;
     found = true;
+    reportedTitle = t.title || "";
     t.status = status;
     t.statusNote = flattenTaskText(note, 500);
     t.reportedAt = now;
@@ -1973,6 +2007,14 @@ async function applyTaskReport(res, { slug, taskId, status, note }) {
     db[slug].updatedAt = now;
   });
   if (!found) return res.status(404).json({ error: "task not found" });
+  if (status === "complete" || status === "failed") {
+    pushEvent(
+      status === "complete" ? "success" : "error",
+      `${projectNameForSlug(slug)} — task ${status === "complete" ? "done" : "failed"}`,
+      flattenTaskText(reportedTitle, 90) || "",
+      { slug }
+    );
+  }
   res.json({ ok: true });
 }
 // Pickup acknowledgement — the FIRST thing a spawned session runs. Marks
@@ -2228,6 +2270,7 @@ async function fireSchedule(sched) {
       spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, [task], cfg.port), cliKey, {
         headless: cfg.headlessTerminals === true,
         slug,
+        taskIds: [task.id],
       });
       fired.push({ slug, taskId: task.id });
     } catch (err) {
@@ -2258,10 +2301,13 @@ async function runDueSchedules(reason = "tick") {
         const r = await fireSchedule(s);
         firedTaskId = r.taskId;
         console.log(`[schedule] fired ${s.id} (${reason}) → ${r.fired.length} task(s) via ${r.cli}`);
+        pushEvent("info", `Scheduled task started`, flattenTaskText(s.title, 90),
+          { slug: r.fired[0]?.slug || s.slug });
         if (r.errors.length) console.warn(`[schedule] partial: ${s.id} skipped ${r.errors.length} project(s): ${r.errors.join("; ")}`);
       } catch (err) {
         errMsg = err?.message || String(err);
         console.warn(`[schedule] fire failed ${s.id}: ${errMsg}`);
+        pushEvent("error", "Scheduled task couldn't start", errMsg.slice(0, 90), { slug: s.slug });
       }
       const ranAt = new Date().toISOString();
       // Advance strictly past "now" so an at-or-before-now comparison next tick
@@ -2428,6 +2474,29 @@ app.post("/api/schedules/:id/run", async (req, res) => {
 // Detached-spawn helper that handles Node 20+'s restriction on running .cmd/.bat
 // files. Without shell:true Node throws EINVAL for those; with shell:true Node
 // concatenates args without escaping, so we manually quote every argument.
+// Environment for anything we launch into a terminal.
+//
+// Coding Drives can itself be started from inside a Claude Code session (an
+// agent relaunching the app, a dev running `npm run dev` from one). The app
+// then inherits that session's markers, every terminal it spawns inherits them
+// in turn, and the CLI opens with a warning banner before its prompt —
+// "Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker" —
+// because it thinks it is a nested child session rather than a fresh one.
+// A terminal opened from a project card is always a NEW top-level session, so
+// strip the markers that say otherwise. Everything else (PATH, credentials,
+// the user's own settings) is passed through untouched.
+const INHERITED_SESSION_VARS = [
+  "CLAUDECODE",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "CLAUDE_CODE_SSE_PORT",
+];
+function cleanChildEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const k of INHERITED_SESSION_VARS) delete env[k];
+  return env;
+}
+
 function spawnDetached(exe, args = [], { cwd } = {}) {
   const isShellScript = /\.(cmd|bat)$/i.test(exe);
   const opts = { detached: true, stdio: "ignore", windowsHide: true, cwd };
@@ -2477,7 +2546,7 @@ function spawnTerminal(folder, cmd) {
   return spawn(
     "cmd.exe",
     ["/c", "start", "", "wt.exe", "-d", folder, "cmd", "/k", cmd],
-    { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+    { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
   ).unref();
 }
 
@@ -2488,7 +2557,7 @@ function spawnTerminalPS(folder, ps) {
   return spawn(
     "cmd.exe",
     ["/c", "start", "", "wt.exe", "-d", folder, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
-    { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+    { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
   ).unref();
 }
 
@@ -2602,7 +2671,7 @@ function openHeadlessSessionTerminals(slug = "") {
       spawn(
         "cmd.exe",
         ["/c", "start", "", "wt.exe", "--title", `${title} — live`, "powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptFile],
-        { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+        { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
       ).unref();
       opened++;
     } catch {}
@@ -2787,9 +2856,32 @@ foreach($h in [CDWin]::Candidates()){
   $wins += ,@{ H = $h; Title = $title; Tabs = $tabs; HasTabs = $hasTabs; IsTarget = $isTarget }
 }
 
-if($nl -eq ''){
-  # No needle = the global "open everything" action.
+if($nl -eq '' -and $targets.Count -eq 0){
+  # No needle and no handles = the global "open everything" action.
   foreach($w in $wins){ CDRaiseOnce $w.H; $count++ }
+  Write-Output $count
+  exit
+}
+
+# Handles were supplied: those windows ARE the answer. They were resolved from
+# each live session's own terminal process, so they name the right windows with
+# no guessing — raise exactly them and stop. This is what fixes "three
+# terminals open and it raises the wrong one": title matching takes whatever
+# answers first, while a handle can only ever be this project's session.
+if($targets.Count -gt 0){
+  foreach($w in $wins){
+    if(-not $w.IsTarget){ continue }
+    # Bring this project's tab to the front inside the window before raising
+    # it, so a window holding several sessions opens showing the right one.
+    if($w.HasTabs -and $nl -ne ''){
+      foreach($t in $w.Tabs){
+        $name = $t.Current.Name
+        if($name -ne $null -and (CDNorm $name).Contains($nl)){ CDSelectTab $t; break }
+      }
+    }
+    CDRaiseOnce $w.H
+    $count++
+  }
   Write-Output $count
   exit
 }
@@ -2880,10 +2972,21 @@ public class CDEnum{
 }
 "@
 $wt=@{}; Get-Process WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object { $wt[[uint32]$_.Id]=$true }
-foreach($h in [CDEnum]::All()){ if($wt.ContainsKey([uint32][CDEnum]::Pid($h))){ $h.ToInt64().ToString() } }`;
+foreach($h in [CDEnum]::All()){ $wpid=[uint32][CDEnum]::Pid($h); if($wt.ContainsKey($wpid)){ ($h.ToInt64().ToString() + ':' + $wpid.ToString()) } }`;
   let out = "";
   let done = false;
-  const finish = () => { if (done) return; done = true; try { cb(out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)); } catch {} };
+  // Each line is "<handle>:<wtPid>". Callers keep the old contract (a bare
+  // handle list as the first argument); the second argument carries the pid
+  // alongside, which is how a session is matched to its exact window.
+  const finish = () => {
+    if (done) return;
+    done = true;
+    const rows = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).map((line) => {
+      const [h, wpid] = line.split(":");
+      return { handle: h, pid: Number(wpid) || 0 };
+    });
+    try { cb(rows.map((r) => r.handle), rows); } catch {}
+  };
   try {
     const p = spawn("powershell.exe",
       ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
@@ -2895,240 +2998,300 @@ foreach($h in [CDEnum]::All()){ if($wt.ContainsKey([uint32][CDEnum]::Pid($h))){ 
   } catch { finish(); }
 }
 
-// ── Session window handles ──────────────────────────────────────────────────
-// Claude/Codex rename their Windows Terminal tab within seconds of starting —
-// sometimes to a title that no longer contains the project name at all (just
-// "claude", or a summary of the task in flight). Title matching alone then
-// finds NOTHING, and the session badge answers "no terminals found" for a
-// session that is running right there. So every launch also records WHICH
-// window it created (by handle, diffed against a pre-launch snapshot — the
-// same trick minimizeNewWtWindow uses), and the badge's raise targets those
-// handles directly, immune to whatever the CLI renames its tab to.
-// slug → Map(handle → registeredAt).
-const sessionWindowsBySlug = new Map();
-const SESSION_HANDLE_TTL_MS = 24 * 60 * 60 * 1000;
-
-function registerSessionWindows(slug, handles) {
-  if (!slug || !handles || !handles.length) return;
-  const m = sessionWindowsBySlug.get(slug) || new Map();
-  for (const h of handles) m.set(String(h), Date.now());
-  sessionWindowsBySlug.set(slug, m);
+// ── App event feed ──────────────────────────────────────────────────────────
+// Things that finish while nobody is looking — a task reporting back, a
+// session ending, a schedule firing — used to be visible only as a state
+// change on a card at the next poll. They are pushed here instead and the
+// dashboard turns each one into a toast exactly once (it tracks the highest
+// seq it has shown), so background work announces itself.
+const appEvents = [];
+let _eventSeq = 0;
+function pushEvent(kind, title, sub = "", extra = {}) {
+  appEvents.push({ seq: ++_eventSeq, at: Date.now(), kind, title, sub, ...extra });
+  if (appEvents.length > 40) appEvents.splice(0, appEvents.length - 40);
+}
+function projectNameForSlug(slug) {
+  try { return path.basename(fromSlug(slug)) || slug; } catch { return slug; }
 }
 
-// Handles registered for a project, minus anything expired. Dead handles are
-// harmless — the raise script only touches handles that still belong to a
-// live WindowsTerminal process — so expiry is just housekeeping.
-function sessionWindowHandles(slug) {
-  const m = sessionWindowsBySlug.get(slug);
-  if (!m) return [];
-  const now = Date.now();
-  for (const [h, at] of m) if (now - at > SESSION_HANDLE_TTL_MS) m.delete(h);
-  if (m.size === 0) { sessionWindowsBySlug.delete(slug); return []; }
-  return Array.from(m.keys());
-}
-
-// Watch for the wt window a just-issued launch creates and file it under
-// `slug`. Window creation takes a couple of seconds, so poll the open-window
-// set a few times and register every handle not present in `baseline`.
-// Over-inclusion (an unrelated window opened in the same beat) is acceptable:
-// worst case the badge raises one extra window, versus finding nothing.
-function trackNewWindowForSlug(slug, baseline) {
-  if (!slug) return;
-  const base = new Set((baseline || []).map(String));
-  const delays = [1500, 4000, 9000];
-  const poll = (i) => {
-    if (i >= delays.length) return;
-    const t = setTimeout(() => {
-      captureWtWindows((now) => {
-        const fresh = (now || []).map(String).filter((h) => !base.has(h));
-        if (fresh.length) registerSessionWindows(slug, fresh);
-        else poll(i + 1);
-      });
-    }, delays[i]);
-    t.unref?.();
-  };
-  poll(0);
-}
-
-// ── Interactive CLI sessions ────────────────────────────────────────────────
-// A "send" (task) is tracked via in-progress task status, so its card already
-// lights up the session badge. Clicking a card's Claude/Codex button opens an
-// interactive terminal we'd otherwise not know about, so we register each one
-// here and the card's badge reads the per-project count.
+// ── Session registry ────────────────────────────────────────────────────────
+// ONE source of truth for "is a terminal session running for this project".
 //
-// Liveness is TAB existence, not window existence. Windows Terminal puts several
-// sessions in ONE window as tabs (dragging tabs together is normal), and under
-// the old window-handle model that broke two ways: closing a single tab left the
-// window alive, so the badge never cleared; and dragging a tab into a different
-// window changed the handle, so the badge cleared for a session still running.
-// The user closes TABS, so tabs are what liveness means.
+// It used to be three, and they disagreed constantly:
+//   * the card badge counted distinct `sentAt` values among in-progress tasks,
+//     so a task left in-progress by a crash or an app restart showed a session
+//     that did not exist — click it and the app answered "no session found"
+//     while the badge kept insisting there was one;
+//   * interactive terminals were tracked in memory only, so a restart cleared
+//     badges for sessions that were still running, and liveness was inferred
+//     from Windows Terminal TAB TITLES over UI Automation — titles the CLIs
+//     rename out from under us seconds after launch;
+//   * raising a session searched every terminal window by title and grabbed
+//     whichever matched first, so with three terminals open you got whichever
+//     one happened to be first rather than the project's own.
 //
-// id → { slug, basename, agent, startedAt }. Keyed by a counter, NOT a window
-// handle — handles stop being meaningful the moment a tab moves. Wiped on a
-// server restart: an interactive session has no on-disk log to re-scan, so after
-// a restart its badge clears even though the window is still open (unchanged
-// from before, and why the badge sometimes looks empty after an app update).
-const liveInteractiveSessions = new Map();
-let _sessionSeq = 0;
+// Now every launch registers a session whose id is STAMPED INTO THE CHILD'S
+// COMMAND LINE (CDSID=<id>). Liveness becomes a fact rather than a guess: one
+// process query says which ids still exist. Walking each live process up to its
+// WindowsTerminal ancestor names the exact window that session lives in, so
+// raising a project's sessions raises those windows and nothing else. The
+// registry is persisted, so it survives an app restart the same way the
+// sessions themselves do.
+const SESSIONS_DB = path.join(DATA_DIR, "sessions.json");
+const SESSION_PROBE_SCRIPT = path.join(DATA_DIR, "cd-session-probe.ps1");
 
-// A just-launched session hasn't painted its tab yet — wt takes a beat. Pruning
-// inside this window would delete the session before its tab ever appeared, and
-// the badge would never show at all.
-const SESSION_TAB_GRACE_MS = 12000;
+// id → { id, slug, basename, agent, kind: "task" | "interactive",
+//        startedAt, taskIds: [], pid, wtPid, seenAt, missingSince }
+const sessions = new Map();
 
-// Tab titles usually carry the project folder name — both our own
-// `--title <basename>` and Claude/Codex's "<spinner> <project>" rename contain
-// it. Case-insensitive substring. The CLIs sometimes retitle further (to just
-// "claude", or a task summary) — the tracked window handles cover that case,
-// both here (pruning) and in the badge's raise.
-function tabTitleMatches(title, basename) {
-  if (!title || !basename) return false;
-  return String(title).toLowerCase().includes(String(basename).toLowerCase());
+// A launch needs a beat before its process exists and can be found. Probing
+// inside this window would delete the session before it ever started.
+const SESSION_START_GRACE_MS = 25 * 1000;
+// How long a session may be missing from the probe before it is dropped. One
+// missed probe (a busy machine, a transient WMI hiccup) must never clear a
+// badge for a session that is still running.
+const SESSION_MISSING_GRACE_MS = 12 * 1000;
+// Probe results are reused for this long — /api/projects is polled every few
+// seconds and a process query per poll would be wasteful.
+const SESSION_PROBE_TTL_MS = 3500;
+
+let _sessionProbe = { at: 0, byId: new Map() };
+let _sessionProbeInFlight = null;
+
+function newSessionId() {
+  return "cds" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-// Every Windows Terminal TAB title currently open. UI Automation is the only way
-// to see individual tabs — Win32 exposes one title per window, its active tab's.
-function listSessionTabs() {
-  return new Promise((resolve) => {
-    const script =
+// The id as it is written into a child's command line. PowerShell gets a real
+// env assignment; cmd gets `set`. Either way the literal text CDSID=<id> ends
+// up in the process's command line, which is what the probe searches for.
+// Clearing the inherited markers has to happen INSIDE the shell command, not
+// just in the environment we spawn with: `wt.exe` hands the request off to an
+// already-running Windows Terminal process when one exists, so the new tab's
+// shell inherits THAT process's environment, not ours. Doing it in the command
+// line is the only place that always wins.
+function sessionMarkerPS(id) {
+  const clear = INHERITED_SESSION_VARS.map((v) => `Env:${v}`).join(",");
+  return `$env:CDSID='${id}'; Remove-Item ${clear} -ErrorAction SilentlyContinue; `;
+}
+function sessionMarkerCmd(id) {
+  const clear = INHERITED_SESSION_VARS.map((v) => `set "${v}="& `).join("");
+  return `set CDSID=${id}& ${clear}`;
+}
+
+function loadSessionsFromDisk() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SESSIONS_DB, "utf8"));
+    if (!Array.isArray(raw)) return;
+    for (const s of raw) {
+      if (s && typeof s.id === "string" && typeof s.slug === "string") {
+        sessions.set(s.id, { taskIds: [], ...s, seenAt: 0, missingSince: 0 });
+      }
+    }
+  } catch { /* no registry yet */ }
+}
+
+function saveSessionsToDisk() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const rows = [...sessions.values()].map(({ seenAt, missingSince, ...rest }) => rest);
+    fs.writeFileSync(SESSIONS_DB, JSON.stringify(rows, null, 2));
+  } catch { /* best effort — the probe rebuilds liveness anyway */ }
+}
+
+function registerSession({ slug, basename, agent, kind, taskIds = [] }) {
+  const id = newSessionId();
+  sessions.set(id, {
+    id, slug, basename, agent, kind,
+    taskIds: [...taskIds],
+    startedAt: Date.now(),
+    pid: 0, wtPid: 0, seenAt: 0, missingSince: 0,
+  });
+  saveSessionsToDisk();
+  return id;
+}
+
+// The probe script lives on disk and runs with -File, so the probe's OWN
+// command line never contains the marker it searches for. An inline -Command
+// would match itself and report a session that is really just the probe.
+function ensureProbeScript() {
+  const body =
 `$ErrorActionPreference='SilentlyContinue'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-Add-Type @"
-using System;using System.Collections.Generic;using System.Runtime.InteropServices;using System.Text;
-public class CDTabs{
- public delegate bool EP(IntPtr h,IntPtr l);
- [DllImport("user32.dll")] public static extern bool EnumWindows(EP cb,IntPtr l);
- [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
- [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
- public static List<IntPtr> All(){var r=new List<IntPtr>();EnumWindows((h,l)=>{r.Add(h);return true;},IntPtr.Zero);return r;}
- public static uint Pid(IntPtr h){uint p;GetWindowThreadProcessId(h,out p);return p;}
- public static string T(IntPtr h){var s=new StringBuilder(512);GetWindowText(h,s,512);return s.ToString();}
+# Only the process names a dashboard session can appear as, plus the terminal
+# hosts we walk up through. Far cheaper and steadier than enumerating all.
+$procs = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='cmd.exe' OR Name='WindowsTerminal.exe' OR Name='OpenConsole.exe' OR Name='conhost.exe'"
+$byId = @{}
+foreach ($p in $procs) { $byId[[uint32]$p.ProcessId] = $p }
+$out = New-Object System.Collections.ArrayList
+foreach ($p in $procs) {
+  if (-not $p.CommandLine) { continue }
+  $m = [regex]::Match($p.CommandLine, 'CDSID=[''"]?([a-z0-9]+)')
+  if (-not $m.Success) { continue }
+  # Walk up to the Windows Terminal window hosting this pane. The chain is
+  # WindowsTerminal.exe -> OpenConsole.exe -> the shell, so a few hops is
+  # always enough.
+  $wt = 0
+  $cur = $p
+  $hops = 0
+  while ($cur -and $hops -lt 8) {
+    if ($cur.Name -eq 'WindowsTerminal.exe') { $wt = $cur.ProcessId; break }
+    $cur = $byId[[uint32]$cur.ParentProcessId]
+    $hops++
+  }
+  [void]$out.Add([pscustomobject]@{ id = $m.Groups[1].Value; pid = $p.ProcessId; wt = $wt })
 }
-"@
-$wt=@{}; Get-Process WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object { $wt[[uint32]$_.Id]=$true }
-$cond = New-Object System.Windows.Automation.PropertyCondition(
-  [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-  [System.Windows.Automation.ControlType]::TabItem)
-foreach($h in [CDTabs]::All()){
-  if(-not $wt.ContainsKey([uint32][CDTabs]::Pid($h))){ continue }
-  if(([CDTabs]::T($h)) -eq ''){ continue }
-  $el = [System.Windows.Automation.AutomationElement]::FromHandle($h)
-  if($el -eq $null){ continue }
-  try { foreach($t in $el.FindAll([System.Windows.Automation.TreeScope]::Descendants,$cond)){ $t.Current.Name } } catch { }
-}`;
+if ($out.Count -eq 0) { '[]' } else { ConvertTo-Json -InputObject $out -Compress -Depth 3 }
+`;
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const want = "﻿" + body;
+    let have = null;
+    try { have = fs.readFileSync(SESSION_PROBE_SCRIPT, "utf8"); } catch {}
+    if (have !== want) fs.writeFileSync(SESSION_PROBE_SCRIPT, want, "utf8");
+    return true;
+  } catch { return false; }
+}
+
+// id → { pid, wtPid } for every dashboard session currently alive.
+// Returns null when the probe ITSELF failed, which must never be read as
+// "nothing is running" — a flaky probe clearing every badge is precisely the
+// bug this replaces.
+function probeSessions() {
+  const now = Date.now();
+  if (now - _sessionProbe.at < SESSION_PROBE_TTL_MS) return Promise.resolve(_sessionProbe.byId);
+  if (_sessionProbeInFlight) return _sessionProbeInFlight;
+  if (!ensureProbeScript()) return Promise.resolve(null);
+
+  _sessionProbeInFlight = new Promise((resolve) => {
     let out = "";
     let done = false;
-    // On ANY failure — timeout, UIA error, no output — resolve null rather than
-    // an empty list. Null means "couldn't tell", and the caller leaves sessions
-    // alone; an empty list would read as "every tab is gone" and wipe every
-    // badge the moment a scan hiccuped.
     const finish = (ok) => {
       if (done) return;
       done = true;
-      const tabs = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      resolve(ok && tabs.length ? tabs : null);
+      _sessionProbeInFlight = null;
+      if (!ok) return resolve(null);
+      let rows = [];
+      try {
+        const parsed = JSON.parse(out.trim() || "[]");
+        rows = Array.isArray(parsed) ? parsed : [parsed];
+      } catch { return resolve(null); }
+      const byId = new Map();
+      for (const r of rows) {
+        if (!r || !r.id) continue;
+        byId.set(String(r.id), { pid: Number(r.pid) || 0, wtPid: Number(r.wt) || 0 });
+      }
+      _sessionProbe = { at: Date.now(), byId };
+      resolve(byId);
     };
     try {
-      const p = spawn("powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
-        { windowsHide: true, stdio: ["ignore", "pipe", "ignore"], shell: false });
+      const p = spawn(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", SESSION_PROBE_SCRIPT],
+        { windowsHide: true, stdio: ["ignore", "pipe", "ignore"], shell: false }
+      );
       p.stdout.on("data", (d) => { out += d; });
-      p.on("close", (code) => finish(code === 0));
+      p.on("close", () => finish(true));
       p.on("error", () => finish(false));
       setTimeout(() => finish(false), 8000).unref?.();
     } catch { finish(false); }
   });
+  return _sessionProbeInFlight;
 }
 
-// Open Windows Terminal in `folder` running `cmd`, and register the new window
-// so the project's session badge reflects it. Forces `-w new` so a brand-new
-// window (hence a brand-new handle) reliably appears for the baseline diff to
-// find — and so closing this session's window can't take an unrelated tab with
-// it. Titled with the folder basename so the badge's raise (focusTerminalWindows,
-// matched by basename) brings exactly this window forward. `cmd /k` keeps the
-// shell open if the CLI exits or isn't on PATH, identical to spawnTerminal.
-function spawnTrackedTerminal(folder, cmd, { slug, agent }) {
-  const base = (path.basename(folder) || "session").replace(/"/g, "");
-  // Snapshot the open wt windows first so the new window can be identified by
-  // handle afterwards (trackNewWindowForSlug) — that's what lets the session
-  // badge raise this exact window even after the CLI renames its tab.
-  captureWtWindows((baseline) => {
-    try {
-      spawn(
-        "cmd.exe",
-        ["/c", "start", "", "wt.exe", "-w", "new", "-d", folder, "--title", base, "cmd", "/k", cmd],
-        { detached: true, stdio: "ignore", windowsHide: true, shell: false }
-      ).unref();
-    } catch {
-      return;   // nothing launched, so nothing to track
+// Refresh every registered session against the probe and drop the ones whose
+// process is gone. Returns the sessions that died in THIS pass so the caller
+// can settle any tasks they left hanging.
+async function reconcileSessions() {
+  if (sessions.size === 0) return [];
+  const live = await probeSessions();
+  if (live === null) return [];        // probe failed — change nothing
+
+  const now = Date.now();
+  const died = [];
+  let dirty = false;
+  for (const [id, s] of sessions) {
+    const hit = live.get(id);
+    if (hit) {
+      s.pid = hit.pid;
+      if (hit.wtPid) s.wtPid = hit.wtPid;
+      s.seenAt = now;
+      if (s.missingSince) { s.missingSince = 0; dirty = true; }
+      continue;
     }
-    trackNewWindowForSlug(slug, baseline);
-    // Register immediately rather than waiting on the handle diff. If wt never
-    // actually opens, no tab will ever match this basename and the next prune
-    // (after the grace period) drops it — the badge self-corrects instead of
-    // needing a second window scan to confirm the launch.
-    liveInteractiveSessions.set(++_sessionSeq, {
-      slug,
-      basename: base,
-      agent,
-      startedAt: Date.now(),
-    });
+    // Absent from the probe. A just-launched session gets time to appear, and
+    // any session gets one grace period of absence before it counts as gone.
+    if (now - s.startedAt < SESSION_START_GRACE_MS) continue;
+    if (!s.missingSince) { s.missingSince = now; continue; }
+    if (now - s.missingSince < SESSION_MISSING_GRACE_MS) continue;
+    sessions.delete(id);
+    died.push(s);
+    dirty = true;
+    pushEvent(
+      "info",
+      `${s.basename || projectNameForSlug(s.slug)} — session closed`,
+      s.kind === "task" ? "The background task terminal has exited." : "The terminal window was closed.",
+      { slug: s.slug }
+    );
+  }
+  if (dirty || died.length) saveSessionsToDisk();
+  return died;
+}
+
+// Live sessions for one project — what its card badge counts.
+function liveSessionsFor(slug) {
+  return [...sessions.values()].filter((s) => s.slug === slug);
+}
+function liveSessionCount(slug) {
+  return liveSessionsFor(slug).length;
+}
+
+// A session that ended without its tasks reporting back leaves those tasks
+// spinning "in progress" forever (until the 2-hour staleness sweep). Settle
+// them the moment the session's process disappears, which is also what stops
+// the card badge and the task marks disagreeing.
+async function settleTasksForDeadSessions(died) {
+  const withTasks = died.filter((s) => s.kind === "task" && s.taskIds?.length);
+  if (!withTasks.length) return;
+  const iso = new Date().toISOString();
+  await updateDB((db) => {
+    for (const s of withTasks) {
+      const entry = db[s.slug];
+      if (!entry?.tasks) continue;
+      for (const t of entry.tasks) {
+        if (!s.taskIds.includes(t.id) || t.status !== "in-progress") continue;
+        t.status = "failed";
+        t.statusNote = t.ackedAt
+          ? "The session ended before reporting back — it may have been closed mid-task."
+          : "The session closed before the agent checked in.";
+        t.updatedAt = iso;
+        entry.updatedAt = iso;
+      }
+    }
   });
 }
 
-// Drop any registered interactive session whose window has been closed, so the
-// badge clears when the user exits/closes the terminal. Resolves immediately
-// when nothing is tracked (no PowerShell spawned). Called before each
-// /api/projects response so the count the card reads is always current.
-async function pruneInteractiveSessions() {
-  if (liveInteractiveSessions.size === 0) return;
-  const tabs = await listSessionTabs();
-  // null = the scan failed, not "no tabs open". Leave every session alone; a
-  // flaky scan must never wipe badges for sessions that are still running.
-  if (tabs === null) return;
-
-  // Live window handles are the second liveness signal: Claude/Codex can
-  // retitle their tab to something with no project name in it, and a
-  // title-only census would prune a session that is still running.
-  const liveHandles = await new Promise((resolve) =>
-    captureWtWindows((h) => resolve(new Set((h || []).map(String))))
-  );
-
-  const now = Date.now();
-  // Group by basename: two sessions on the same project produce two tabs with
-  // the same title, so they can only be reconciled as a group.
-  const byBase = new Map();
-  for (const [id, s] of liveInteractiveSessions) {
-    if (!byBase.has(s.basename)) byBase.set(s.basename, []);
-    byBase.get(s.basename).push([id, s]);
+// ── Interactive CLI sessions ────────────────────────────────────────────────
+// Clicking a card's Claude/Codex/Gemini button opens a terminal we'd otherwise
+// know nothing about, so each one is registered in the same registry the task
+// sends use. `cmd /k` is kept (the CLI launcher line is cmd syntax) and the
+// session id rides in front of it as a `set`, which puts CDSID=<id> in the
+// process's command line for the probe to find.
+function spawnTrackedTerminal(folder, cmd, { slug, agent }) {
+  const base = (path.basename(folder) || "session").replace(/"/g, "");
+  const id = registerSession({ slug, basename: base, agent, kind: "interactive" });
+  try {
+    spawn(
+      "cmd.exe",
+      ["/c", "start", "", "wt.exe", "-w", "new", "-d", folder,
+       "--title", base, "--suppressApplicationTitle",
+       "cmd", "/k", sessionMarkerCmd(id) + cmd],
+      { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
+    ).unref();
+  } catch {
+    sessions.delete(id);          // nothing launched, so nothing to track
+    saveSessionsToDisk();
   }
-
-  for (const [base, entries] of byBase) {
-    const openTabs = tabs.filter((t) => tabTitleMatches(t, base)).length;
-    // Tracked windows still open for this group's project(s). max() with the
-    // tab count, never a sum — a titled tab usually LIVES in a tracked window,
-    // and double-counting would keep dead sessions on the badge forever.
-    let handleAlive = 0;
-    for (const sl of new Set(entries.map(([, s]) => s.slug))) {
-      for (const h of sessionWindowHandles(sl)) if (liveHandles.has(h)) handleAlive++;
-    }
-    // Newest first, so when tabs close it's the oldest session that's dropped
-    // and a just-launched one is never the casualty.
-    entries.sort((a, b) => b[1].startedAt - a[1].startedAt);
-    let slots = Math.max(openTabs, handleAlive);
-    for (const [id, s] of entries) {
-      if (now - s.startedAt < SESSION_TAB_GRACE_MS) continue;   // tab may not exist yet
-      if (slots > 0) { slots--; continue; }                      // still has a tab
-      liveInteractiveSessions.delete(id);                        // its tab is gone
-    }
-  }
-}
-
-// How many interactive sessions are live for one project (its card badge count).
-function liveInteractiveCount(slug) {
-  let n = 0;
-  for (const s of liveInteractiveSessions.values()) if (s.slug === slug) n++;
-  return n;
+  return id;
 }
 
 // Minimize the ONE Windows Terminal window that appeared after `baseline` was
@@ -3187,7 +3350,7 @@ for($i=0; $i -lt 45 -and $done -lt 2; $i++){
     spawn(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", scriptFile],
-      { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+      { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
     ).unref();
   } catch {}
 }
@@ -3207,7 +3370,7 @@ async function openClaudeDesktop(folder) {
     await electron.shell.openExternal(uri);
   } else {
     spawn("cmd.exe", ["/c", "start", "", uri],
-      { detached: true, stdio: "ignore", windowsHide: true, shell: false }).unref();
+      { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }).unref();
   }
 }
 
@@ -3220,7 +3383,7 @@ async function openClaudeDesktop(folder) {
 // install gate above still applies to codex in both modes.
 function spawnCodexDesktop(folder, codexCmd) {
   return spawn("cmd.exe", ["/c", codexCmd, "app", folder],
-    { detached: true, stdio: "ignore", windowsHide: true, shell: false }).unref();
+    { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }).unref();
 }
 
 // Tools we gate behind an install-confirmation modal. The bare command name
@@ -3308,6 +3471,21 @@ const AI_AUTONOMY_FLAGS = {
   codex: "--dangerously-bypass-approvals-and-sandbox",
   gemini: "--yolo",
 };
+
+// Settings → Tasks → "Model". Empty means "whatever the CLI is already set to",
+// which stays the default so an existing install behaves exactly as before.
+// The value is passed straight through as the CLI's own --model flag, so a
+// model id the CLI knows about but this app has never heard of still works.
+const AI_MODEL_FLAG = { claude: "--model", codex: "--model", gemini: "--model" };
+function modelFlagFor(cliKey, cfg) {
+  const picked = String(cfg?.taskModels?.[cliKey] || "").trim();
+  if (!picked) return "";
+  // Guard the shell: ids are [a-z0-9.\-_:] in practice, and anything else is
+  // a mistake we shouldn't paste into a command line.
+  if (!/^[A-Za-z0-9._:\-]{1,64}$/.test(picked)) return "";
+  const flag = AI_MODEL_FLAG[cliKey];
+  return flag ? `${flag} ${picked}` : "";
+}
 
 // ─── Auto-accept (launch-prompt pre-seeding) ─────────────────────────────────
 // Both Claude Code and Codex gate first-run in a directory behind one-time
@@ -3433,6 +3611,14 @@ app.post("/api/projects/:slug/open", async (req, res) => {
   if (!fs.existsSync(folder)) return res.status(404).json({ error: "folder not found" });
 
   const tool = req.body?.tool;
+  // Opening a project counts as working on it — the All page sorts each
+  // status group by the most recent of this, the last in-app edit, and the
+  // folder's own mtime. Fire-and-forget so it never delays the launch.
+  updateDB((db) => {
+    const entry = db[req.params.slug] || {};
+    entry.lastOpenedAt = new Date().toISOString();
+    db[req.params.slug] = entry;
+  }).catch(() => {});
   // Per-button open mode from the card-buttons config ("app" | "cli"),
   // passed by the frontend with each click. Absent (older frontend, direct
   // API use) falls back to the legacy desktop toggles.
@@ -3494,7 +3680,7 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       // doesn't prompt, and --yolo pre-grants the per-action approvals.
       spawnTrackedTerminal(
         folder,
-        `${cliCommandLine(resolveCliPath(cfg.tools.gemini || "gemini"))} ${AI_AUTONOMY_FLAGS.gemini}`,
+        [cliCommandLine(resolveCliPath(cfg.tools.gemini || "gemini")), AI_AUTONOMY_FLAGS.gemini, modelFlagFor("gemini", cfg)].filter(Boolean).join(" "),
         { slug: req.params.slug, agent: "gemini" }
       );
     } else if (tool === "claude") {
@@ -3506,7 +3692,7 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       } else {
         spawnTrackedTerminal(
           folder,
-          `${cliCommandLine(resolveCliPath(cfg.tools.claude || "claude"))} ${AI_AUTONOMY_FLAGS.claude}`,
+          [cliCommandLine(resolveCliPath(cfg.tools.claude || "claude")), AI_AUTONOMY_FLAGS.claude, modelFlagFor("claude", cfg)].filter(Boolean).join(" "),
           { slug: req.params.slug, agent: "claude" }
         );
       }
@@ -3519,7 +3705,7 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       } else {
         spawnTrackedTerminal(
           folder,
-          `${cliCommandLine(resolveCliPath(cfg.tools.codex || "codex"))} ${AI_AUTONOMY_FLAGS.codex}`,
+          [cliCommandLine(resolveCliPath(cfg.tools.codex || "codex")), AI_AUTONOMY_FLAGS.codex, modelFlagFor("codex", cfg)].filter(Boolean).join(" "),
           { slug: req.params.slug, agent: "codex" }
         );
       }
@@ -5072,8 +5258,15 @@ const RELEASE_PROMPT =
 // touches cmd.exe's parser (quotes/&/parens in prompts used to shatter the
 // argument mid-chain). The relay line itself contains only single quotes,
 // which every layer of the chain passes through verbatim.
-function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false, slug = "" } = {}) {
+function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false, slug = "", taskIds = [] } = {}) {
   const exe = resolveCliPath(cliExecutable);
+  // Register the session BEFORE launching so its id can be stamped into the
+  // child's command line — that stamp is what makes the session findable
+  // later, including after an app restart.
+  const sessionBase = (path.basename(folder) || "AI session").replace(/"/g, "");
+  const sessionId = registerSession({
+    slug, basename: sessionBase, agent: cliKey, kind: "task", taskIds,
+  });
   // Prune relay files + headless session logs from earlier sends (older than an hour).
   try {
     for (const f of fs.readdirSync(DATA_DIR)) {
@@ -5106,9 +5299,10 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
     // the taskbar instead of grabbing focus. Folder trust is pre-seeded by
     // ensureFolderTrusted before we get here, so the interactive CLI (no `-p`)
     // never stops on the trust prompt.
-    const flags = AI_AUTONOMY_FLAGS[cliKey] || "";
-    const ps = `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
-    const base = (path.basename(folder) || "AI session").replace(/"/g, "");
+    const flags = [AI_AUTONOMY_FLAGS[cliKey] || "", modelFlagFor(cliKey, loadConfig())].filter(Boolean).join(" ");
+    const ps = sessionMarkerPS(sessionId) +
+      `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
+    const base = sessionBase;
     // Snapshot the open wt windows BEFORE launching, then open a fresh window
     // (-w new) and minimize whichever window is new. Identifying it by handle
     // (not title) is what makes this reliable: Claude/Codex rename the wt tab to
@@ -5120,14 +5314,13 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
       try {
         spawn(
           "cmd.exe",
-          ["/c", "start", "", "wt.exe", "-w", "new", "-d", folder, "--title", base, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
-          { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+          ["/c", "start", "", "wt.exe", "-w", "new", "-d", folder,
+           "--title", base, "--suppressApplicationTitle",
+           "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+          { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
         ).unref();
       } catch {}
       minimizeNewWtWindow(baseline, base);
-      // Remember which window this session lives in so the badge can raise it
-      // by handle even after Claude/Codex retitle the tab beyond recognition.
-      trackNewWindowForSlug(slug, baseline);
     });
     return;
   }
@@ -5138,18 +5331,20 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
   // when the session badge raises several windows at once (double-quotes
   // stripped so the title can't break out of wt's argument). Snapshot-then-spawn
   // so the new window's handle gets filed under this slug for the badge's raise.
-  const flags = AI_AUTONOMY_FLAGS[cliKey] || "";
-  const ps = `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
-  const winTitle = (path.basename(folder) || "AI session").replace(/"/g, "");
+  const flags = [AI_AUTONOMY_FLAGS[cliKey] || "", modelFlagFor(cliKey, loadConfig())].filter(Boolean).join(" ");
+  const ps = sessionMarkerPS(sessionId) +
+    `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
+  const winTitle = sessionBase;
   captureWtWindows((baseline) => {
     try {
       spawn(
         "cmd.exe",
-        ["/c", "start", "", "wt.exe", "-d", folder, "--title", winTitle, "powershell", "-NoExit", "-NoProfile", "-Command", ps],
-        { detached: true, stdio: "ignore", windowsHide: true, shell: false }
+        ["/c", "start", "", "wt.exe", "-d", folder,
+         "--title", winTitle, "--suppressApplicationTitle",
+         "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+        { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
       ).unref();
     } catch {}
-    trackNewWindowForSlug(slug, baseline);
   });
 }
 
@@ -5248,6 +5443,16 @@ const cfg = loadConfig();
 await syncDesignSystem(cfg);
 await ensureDataDir();
 await migrateDB();
+// Bring the session registry back from disk and immediately check it against
+// real processes. Headless sessions outlive the app, so some entries are still
+// valid; the rest are the phantom badges a restart used to leave behind, and
+// they clear here before the first /api/projects response is served.
+loadSessionsFromDisk();
+setTimeout(() => {
+  reconcileSessions()
+    .then((died) => (died.length ? settleTasksForDeadSessions(died) : null))
+    .catch(() => {});
+}, 1500);
 // Bind explicitly to loopback. Default (0.0.0.0) would expose the API — which
 // can spawn robocopy, run git commands, and open arbitrary paths — to any host
 // on the same LAN. The Electron window always hits 127.0.0.1, so there is no

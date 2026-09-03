@@ -38,8 +38,8 @@
     <div class="brand">
       <img class="brand-mark" id="brand-mark" src="/api/logo" alt="" />
       <div class="brand-text">
-        <div class="brand-eyebrow">Local-first dashboard</div>
-        <h1 class="brand-title">Coding Drives</h1>
+        <div class="brand-eyebrow">Create, Publish, Repeat!</div>
+        <h1 class="brand-title">Coding Drives<span class="brand-by">by Megami</span></h1>
       </div>
     </div>
 
@@ -73,10 +73,6 @@
       <button class="btn btn-brand btn-add" id="btn-add" type="button">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>Add Project</span>
-      </button>
-      <button class="btn btn-secondary btn-scan" id="btn-scan" type="button" aria-label="Scan configured folders for new projects">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
-        <span>Scan</span>
       </button>
       <button class="btn btn-secondary btn-schedule" id="btn-schedule" type="button" aria-label="Scheduled tasks">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5"/><path d="M5 3 2.5 5.5M19 3l2.5 2.5"/></svg>
@@ -144,163 +140,187 @@
         </button>
       </header>
 
+      <!-- Tabs. Settings used to be one long scroll where a wide control
+           (the card-buttons builder) sat beside a one-line toggle, so nothing
+           could line up and every section fought for width. Splitting it into
+           five tabs gives each group the full dialog width, keeps the padding
+           identical left and right, and means no section is ever waiting on
+           empty space for a control that lives somewhere else. -->
+      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button class="settings-tab" type="button" role="tab" data-tab="cards" aria-selected="true">Cards</button>
+        <button class="settings-tab" type="button" role="tab" data-tab="tasks" aria-selected="false">Tasks</button>
+        <button class="settings-tab" type="button" role="tab" data-tab="statuses" aria-selected="false">Statuses</button>
+        <button class="settings-tab" type="button" role="tab" data-tab="folders" aria-selected="false">Folders</button>
+        <button class="settings-tab" type="button" role="tab" data-tab="app" aria-selected="false">App</button>
+      </div>
+
       <div class="modal-body settings-body">
 
-        <!-- Application logo -->
-        <section class="settings-section">
-          <h3 class="settings-title">App logo</h3>
-          <p class="settings-help">Upload a PNG, ICO, JPG, or SVG to change the app logo. (256×256 recommended.)</p>
-          <div class="logo-row">
-            <img class="logo-preview" id="set-logo-preview" src="/api/logo" alt="" />
-            <div class="logo-actions">
-              <button class="btn btn-secondary" id="set-logo-pick" type="button">Replace logo…</button>
-              <button class="btn btn-ghost" id="set-logo-reset" type="button">Reset to default</button>
+        <!-- ── Cards ──────────────────────────────────────────────────── -->
+        <div class="settings-panel" data-panel="cards">
+          <section class="settings-section">
+            <h3 class="settings-title">What each card shows</h3>
+            <p class="settings-help">Turn the badge rows under a project name on or off.</p>
+            <div class="settings-toggle-group">
+              <div class="settings-toggle-row">
+                <div class="settings-toggle-label">
+                  <span class="settings-toggle-title">Tech badges</span>
+                  <p class="settings-help">The framework chip plus GIT / VERCEL / ENV markers.</p>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="set-show-stack" aria-label="Show tech badges" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </span>
+              </div>
+              <div class="settings-toggle-row">
+                <div class="settings-toggle-label">
+                  <span class="settings-toggle-title">Language badges</span>
+                  <p class="settings-help">The coloured language mix under each project.</p>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="set-show-langs" aria-label="Show language badges" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </span>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- Preferences — card display + coding tools, grouped under one label -->
-        <section class="settings-section">
-          <h3 class="settings-title">Preferences</h3>
-          <div class="settings-toggle-group">
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Show tech badges</span>
-                <p class="settings-help">Show the framework chip and integration indicators (GIT, VERCEL, ENV).</p>
-              </div>
-              <span class="switch">
-                <input type="checkbox" id="set-show-stack" aria-label="Show tech badges" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              </span>
+          <!-- Card-buttons builder. Three slots mirror the three action
+               buttons on every card; click a slot, then pick its tool from
+               the tabbed tile grid below (IDEs vs AI agents). Claude/Codex
+               slots grow an App|CLI mini-switch. Rendering happens in
+               renderCardButtonsEditor() (app.js). -->
+          <section class="settings-section">
+            <h3 class="settings-title">Card buttons</h3>
+            <p class="settings-help">Pick a slot, then choose what lives there. Claude and Codex can open as an app or a terminal.</p>
+            <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
+            <div class="gh-vis-segment cardbtn-tabs" id="set-cardbtn-tabs" data-active="ide" role="tablist" aria-label="Tool category">
+              <span class="gh-vis-thumb" aria-hidden="true"></span>
+              <button type="button" class="gh-vis-opt" data-value="ide" aria-pressed="true">IDEs</button>
+              <button type="button" class="gh-vis-opt" data-value="ai" aria-pressed="false">AI agents</button>
             </div>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Show language badges</span>
-                <p class="settings-help">Show the per-language color chips (TypeScript, CSS, etc.).</p>
-              </div>
-              <span class="switch">
-                <input type="checkbox" id="set-show-langs" aria-label="Show language badges" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              </span>
-            </div>
-            <!-- Card-buttons builder. Three slots mirror the three action
-                 buttons on every card; click a slot, then pick its tool from
-                 the tabbed tile grid below (IDEs vs AI agents). Claude/Codex
-                 slots grow an App|CLI mini-switch — that replaces the old
-                 separate "Open X in the desktop app" toggles. All rendering
-                 happens in renderCardButtonsEditor() (app.js). -->
-            <div class="settings-toggle-row settings-row-stack">
-              <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Card buttons</span>
-                <p class="settings-help">Choose the three action buttons every project card shows. Click a slot, then pick what lives there. Claude and Codex can open as their desktop app or a terminal CLI — and if a pick isn't installed yet, its button offers to install it.</p>
-              </div>
-              <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
-              <div class="gh-vis-segment cardbtn-tabs" id="set-cardbtn-tabs" data-active="ide" role="tablist" aria-label="Tool category">
-                <span class="gh-vis-thumb" aria-hidden="true"></span>
-                <button type="button" class="gh-vis-opt" data-value="ide" aria-pressed="true">IDEs</button>
-                <button type="button" class="gh-vis-opt" data-value="ai" aria-pressed="false">AI agents</button>
-              </div>
-              <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
-            </div>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Headless background terminals</span>
-                <p class="settings-help">Run task &amp; publish sessions hidden in the background — they launch, do the work, then close themselves. No terminal window stays open after the job finishes.</p>
-              </div>
-              <span class="switch">
-                <input type="checkbox" id="set-headless-terminals" aria-label="Headless background terminals" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              </span>
-            </div>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Open editor for new tasks</span>
-                <p class="settings-help">Naming a task opens its editor so you can add a description, links and an image right away.</p>
-              </div>
-              <span class="switch">
-                <input type="checkbox" id="set-open-task-editor" aria-label="Open editor for new tasks" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              </span>
-            </div>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-label">
-                <span class="settings-toggle-title">Send tasks with</span>
-                <p class="settings-help">Which coding agent the task send buttons launch.</p>
-              </div>
-              <div class="gh-vis-segment task-agent-segment" id="set-task-agent" data-active="claude" role="radiogroup" aria-label="Task agent">
-                <span class="gh-vis-thumb" aria-hidden="true"></span>
-                <button type="button" class="gh-vis-opt" data-value="claude" aria-pressed="true">Claude</button>
-                <button type="button" class="gh-vis-opt" data-value="codex" aria-pressed="false">Codex</button>
-              </div>
-            </div>
-          </div>
-        </section>
+            <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
+          </section>
+        </div>
 
-        <!-- Statuses -->
-        <section class="settings-section">
-          <h3 class="settings-title">Statuses</h3>
-          <p class="settings-help">
-            The chips a project can be filed under. Rename or recolor any of them, or add your own.
-            Removing a status moves every project still using it to the first status in the list, so
-            no project is ever left without one.
-          </p>
-          <div id="set-status-list" class="status-edit-list"></div>
-          <div class="modal-input-row">
-            <input id="set-status-add" type="text" placeholder="Status name (e.g., Testing)" autocomplete="off" />
-            <button class="btn btn-brand" id="set-status-confirm" type="button">Add</button>
-          </div>
-        </section>
+        <!-- ── Tasks ──────────────────────────────────────────────────── -->
+        <div class="settings-panel" data-panel="tasks" hidden>
+          <section class="settings-section">
+            <h3 class="settings-title">Tasks &amp; sessions</h3>
+            <p class="settings-help">How tasks are written, and how the terminals that run them behave.</p>
+            <div class="settings-toggle-group">
+              <div class="settings-toggle-row">
+                <div class="settings-toggle-label">
+                  <span class="settings-toggle-title">Open editor for new tasks</span>
+                  <p class="settings-help">Naming a task opens its editor for a description, links and an image.</p>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="set-open-task-editor" aria-label="Open editor for new tasks" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </span>
+              </div>
+              <div class="settings-toggle-row">
+                <div class="settings-toggle-label">
+                  <span class="settings-toggle-title">Headless background terminals</span>
+                  <p class="settings-help">Sessions start minimised and close themselves when the work is done.</p>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="set-headless-terminals" aria-label="Headless background terminals" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </span>
+              </div>
+              <div class="settings-toggle-row">
+                <div class="settings-toggle-label">
+                  <span class="settings-toggle-title">Send tasks with</span>
+                  <p class="settings-help">Which agent the task send buttons launch.</p>
+                </div>
+                <div class="gh-vis-segment task-agent-segment" id="set-task-agent" data-active="claude" role="radiogroup" aria-label="Task agent">
+                  <span class="gh-vis-thumb" aria-hidden="true"></span>
+                  <button type="button" class="gh-vis-opt" data-value="claude" aria-pressed="true">Claude</button>
+                  <button type="button" class="gh-vis-opt" data-value="codex" aria-pressed="false">Codex</button>
+                </div>
+              </div>
+              <div class="settings-toggle-row">
+                <div class="settings-toggle-label">
+                  <span class="settings-toggle-title">Model</span>
+                  <p class="settings-help" id="set-model-help">Which model that agent runs. Default uses the CLI's own setting.</p>
+                </div>
+                <select id="set-task-model" class="cd-select" aria-label="Agent model"></select>
+              </div>
+            </div>
+          </section>
+        </div>
 
-        <!-- Scan paths -->
-        <section class="settings-section">
-          <h3 class="settings-title">Scan folders</h3>
-          <p class="settings-help">Each folder listed here is scanned for project subfolders.</p>
-          <div id="set-scan-paths" class="path-list"></div>
-          <div class="modal-input-row">
-            <input id="set-scan-add" type="text" placeholder="C:\path\to\projects" autocomplete="off" />
-            <button class="btn btn-secondary" id="set-scan-pick" type="button">Browse</button>
-            <button class="btn btn-brand" id="set-scan-confirm" type="button">Add</button>
-          </div>
-        </section>
+        <!-- ── Statuses ───────────────────────────────────────────────── -->
+        <div class="settings-panel" data-panel="statuses" hidden>
+          <section class="settings-section">
+            <h3 class="settings-title">Statuses</h3>
+            <p class="settings-help">The chips a project can be filed under. Removing one moves its projects to the first status in the list.</p>
+            <div id="set-status-list" class="status-edit-list"></div>
+            <div class="modal-input-row">
+              <input id="set-status-add" type="text" placeholder="Status name (e.g., Testing)" autocomplete="off" />
+              <button class="btn btn-brand" id="set-status-confirm" type="button">Add</button>
+            </div>
+          </section>
+        </div>
 
-        <!-- Excluded folders -->
-        <section class="settings-section">
-          <h3 class="settings-title">Excluded folder names</h3>
-          <p class="settings-help">
-            Folders matching these names are skipped during scanning. Type a folder name (e.g., <code>Archive</code>)
-            or click <strong>Browse</strong> to pick one — the folder's name will be added to the exclude list.
-          </p>
-          <div id="set-exclude-list" class="chip-edit-row"></div>
-          <div class="modal-input-row">
-            <input id="set-exclude-add" type="text" placeholder="Folder name (e.g., Archive)" autocomplete="off" />
-            <button class="btn btn-secondary" id="set-exclude-pick" type="button">
-              <span>Browse</span>
-            </button>
-            <button class="btn btn-brand" id="set-exclude-confirm" type="button">Add</button>
-          </div>
-        </section>
+        <!-- ── Folders ────────────────────────────────────────────────── -->
+        <div class="settings-panel" data-panel="folders" hidden>
+          <section class="settings-section">
+            <h3 class="settings-title">Scan folders</h3>
+            <p class="settings-help">Every folder here is scanned for project subfolders.</p>
+            <div id="set-scan-paths" class="path-list"></div>
+            <div class="modal-input-row">
+              <input id="set-scan-add" type="text" placeholder="C:\path\to\projects" autocomplete="off" />
+              <button class="btn btn-secondary" id="set-scan-pick" type="button">Browse</button>
+              <button class="btn btn-brand" id="set-scan-confirm" type="button">Add</button>
+            </div>
+          </section>
 
-        <!-- Backup destination (last because it's a one-time setup that
-             rarely needs revisiting after the first launch). -->
-        <section class="settings-section">
-          <h3 class="settings-title">Backup destination</h3>
-          <p class="settings-help">
-            Default folder where new project backups are stored. Each project keeps a memory of where it was last
-            backed up — re-running Backup updates that same folder rather than creating a duplicate.
-          </p>
-          <div class="modal-input-row">
-            <div class="input-with-paste">
-              <input id="set-backup-path" type="text" placeholder="C:\path\to\backups (browse or paste)" autocomplete="off" readonly />
-              <button class="paste-icon-btn" id="set-backup-paste" type="button" aria-label="Paste from clipboard">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
+          <section class="settings-section">
+            <h3 class="settings-title">Excluded folder names</h3>
+            <p class="settings-help">Folder names skipped everywhere &mdash; scanning, backups and GitHub publishing.</p>
+            <div id="set-exclude-list" class="chip-edit-row"></div>
+            <div class="modal-input-row">
+              <input id="set-exclude-add" type="text" placeholder="Folder name (e.g., Archive)" autocomplete="off" />
+              <button class="btn btn-secondary" id="set-exclude-pick" type="button">
+                <span>Browse</span>
+              </button>
+              <button class="btn btn-brand" id="set-exclude-confirm" type="button">Add</button>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h3 class="settings-title">Backup destination</h3>
+            <p class="settings-help">Where a card&rsquo;s Backup action mirrors the project folder to.</p>
+            <div class="modal-input-row">
+              <div class="input-with-paste">
+                <input id="set-backup-path" type="text" placeholder="C:\path\to\backups (browse or paste)" autocomplete="off" readonly />
+                <button class="paste-icon-btn" id="set-backup-paste" type="button" aria-label="Paste from clipboard">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
+                </button>
+              </div>
+              <button class="btn btn-secondary" id="set-backup-pick" type="button">
+                <span>Browse</span>
               </button>
             </div>
-            <button class="btn btn-secondary" id="set-backup-pick" type="button">
-              <span>Browse</span>
-            </button>
-          </div>
-        </section>
+          </section>
+        </div>
 
+        <!-- ── App ────────────────────────────────────────────────────── -->
+        <div class="settings-panel" data-panel="app" hidden>
+          <section class="settings-section">
+            <h3 class="settings-title">App logo</h3>
+            <p class="settings-help">PNG, ICO, JPG or SVG &mdash; 256&times;256 works best.</p>
+            <div class="logo-row">
+              <img class="logo-preview" id="set-logo-preview" src="/api/logo" alt="" />
+              <div class="logo-actions">
+                <button class="btn btn-secondary" id="set-logo-pick" type="button">Replace logo…</button>
+                <button class="btn btn-ghost" id="set-logo-reset" type="button">Reset to default</button>
+              </div>
+            </div>
+          </section>
+        </div>
         <div class="modal-error" id="set-error"></div>
       </div>
 
@@ -708,14 +728,25 @@
              file uploads it immediately, OR paste an image with Ctrl+V anywhere
              in this dialog; the preview + Remove appear once set. -->
         <div class="gh-field task-edit-image-field">
-          <span class="gh-field-label">Reference image <span class="gh-field-hint">(drop a file here, browse, or paste with Ctrl+V)</span></span>
+          <span class="gh-field-label">Reference image <span class="gh-field-hint">(drop it, paste it with Ctrl+V, browse, or give a link/path)</span></span>
           <input id="task-edit-image-input" type="file" accept="image/*" hidden />
-          <div class="task-image-empty task-image-drop" id="task-image-empty">
-            <svg class="task-image-drop-mark" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-            <span class="task-image-drop-text">Drop an image here</span>
-            <button class="btn btn-ghost task-image-attach" id="task-image-attach" type="button">
-              <span>Browse files</span>
-            </button>
+          <div class="task-image-empty" id="task-image-empty">
+            <div class="task-image-drop" id="task-image-drop">
+              <svg class="task-image-drop-mark" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+              <span class="task-image-drop-text">Drop an image here</span>
+              <button class="btn btn-ghost task-image-attach" id="task-image-attach" type="button">
+                <span>Browse files</span>
+              </button>
+            </div>
+            <!-- Second way in, for when the image already lives somewhere:
+                 a web address, or a path on this PC. Same roomy row the
+                 Settings screen uses for scan/backup paths. -->
+            <div class="task-image-or"><span>or point at one</span></div>
+            <div class="modal-input-row">
+              <input id="task-image-src" type="text" placeholder="https://example.com/shot.png   or   C:\Users\you\Pictures\shot.png" autocomplete="off" spellcheck="false" />
+              <button class="btn btn-secondary" id="task-image-pick" type="button">Browse</button>
+              <button class="btn btn-brand" id="task-image-src-add" type="button">Add</button>
+            </div>
           </div>
           <div class="task-image-preview" id="task-image-preview" hidden>
             <button class="task-image-thumb-btn" id="task-image-zoom" type="button" aria-label="Preview image full size" title="Click to preview">
@@ -864,14 +895,15 @@
 
         <div class="schedule-important" role="note">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/></svg>
-          <p>
-            <strong>Important:</strong> scheduled tasks only fire while this PC is on.
-            Closing the window keeps Coding Drives running in the background (system tray),
-            so schedules still fire on time — use the tray icon's <em>Quit</em> to stop it
-            completely. If the PC was off or the app fully quit when a run was due, the task
-            fires the moment Coding Drives next starts. Times follow this device's clock and
-            timezone<span id="sched-tz"></span>.
-          </p>
+          <div>
+          <p><strong>If the PC is off, nothing is lost.</strong></p>
+          <ul class="schedule-important-list">
+            <li>A missed run fires as soon as Coding Drives starts up again.</li>
+            <li>Missing several in a row still fires <strong>once</strong> — it catches up, it doesn't pile up.</li>
+            <li>Closing the window doesn't stop anything: the app keeps running in the system tray. Only tray &rarr; <em>Quit</em> stops schedules.</li>
+            <li>Times use this PC's clock<span id="sched-tz"></span>.</li>
+          </ul>
+          </div>
         </div>
       </div>
       <footer class="modal-foot">
