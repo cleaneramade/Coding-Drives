@@ -1708,7 +1708,17 @@ body:has(.modal.is-open) { overflow: hidden; }
   overflow: hidden;
 }
 .modal-lg .modal-card { width: min(640px, 100%); }
-.settings-body { overflow-y: auto; }
+/* ONE height for every tab. The panels differ wildly — Folders is nearly four
+   times the App tab — and a dialog that resizes on each tab click drags the tab
+   strip up and down under the pointer, so you end up chasing the tab you meant
+   to click next. The body is pinned and scrolls inside instead; the header,
+   tab strip and footer never move. The cap leaves room for the dialog chrome
+   (54 head + 42 tabs + 68 footer + the 64px the card keeps off the viewport). */
+.settings-body {
+  overflow-y: auto;
+  flex: 0 0 auto;
+  height: min(620px, calc(100vh - 228px));
+}
 
 /* ── Settings tabs ─────────────────────────────────────────────────────────
    A left-to-right strip under the dialog title. Each tab owns the full width
@@ -2347,7 +2357,10 @@ body:has(.modal.is-open) { overflow: hidden; }
   padding: 18px 0 20px;
   border-bottom: 1px solid var(--border-soft);
 }
-.settings-section:last-of-type { border-bottom: 0; }
+/* No trailing rule and no trailing padding at the foot of a panel — the
+   dialog footer already provides that gap, and the 20px was pushing Folders
+   five pixels past the pinned body height for a scrollbar nobody needs. */
+.settings-section:last-of-type { border-bottom: 0; padding-bottom: 2px; }
 .settings-title {
   font-family: var(--font-display);
   font-weight: 700;
