@@ -1708,19 +1708,24 @@ body:has(.modal.is-open) { overflow: hidden; }
   overflow: hidden;
 }
 .modal-lg .modal-card { width: min(640px, 100%); }
-/* ONE height for every tab. The panels differ wildly — Folders is nearly four
-   times the App tab — and a dialog that resizes on each tab click drags the tab
-   strip up and down under the pointer, so you end up chasing the tab you meant
-   to click next. The body is pinned and scrolls inside instead; the header,
-   tab strip and footer never move. The cap leaves room for the dialog chrome
-   (54 head + 42 tabs + 68 footer + the 64px the card keeps off the viewport). */
-.settings-body {
-  overflow-y: auto;
-  flex: 0 0 auto;
-  /* No footer any more, so the body claims that height: the cap allows for
-     the header, the tab strip and the 32px the card keeps off the viewport. */
-  height: min(760px, calc(100vh - 146px));
+/* ONE height for every tab — the panels differ wildly, and a dialog that
+   resizes on each tab click drags the tab strip up and down under the pointer,
+   so you end up chasing the tab you meant to click next.
+
+   The CARD is what holds that height, and the body simply takes whatever is
+   left over. That matters more than it sounds: the body used to carry a
+   hard-coded height that had to be re-derived by hand every time any padding
+   above it changed, so every spacing tweak turned into an arithmetic problem
+   and got paid for by shaving pixels off something else. Now spacing is free
+   to be whatever it should be, and a tab that overflows simply scrolls. */
+#modal-settings .modal-card {
+  height: min(860px, calc(100vh - 24px));
+  max-height: calc(100vh - 24px);
 }
+.settings-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* Needs the id: .modal-body sets the shared padding further down the file and
+   would otherwise win on equal specificity. */
+#modal-settings .settings-body { padding: 12px 20px 24px; }
 
 /* ── Settings header actions ─────────────────────────────────────────────
    Save and Reset sit in the header, left of the close button, at a size that
@@ -1767,12 +1772,6 @@ body:has(.modal.is-open) { overflow: hidden; }
    with five tabs to fit at a single height, and the Cards tab now carries a
    card preview. Scoped so no other modal grows. */
 #modal-settings .modal-card { max-height: calc(100vh - 24px); }
-/* Bottom only. With no footer under it the last row of the fullest tab sat
-   19px off the card's rounded bottom edge, so that end gets 24px. The TOP
-   keeps the shared 8px: the clearance the tab strip needs is its own margin,
-   above it, not a gap between it and the panel it labels. Needs the id to
-   outrank .modal-body, which sets the shared padding further down the file. */
-#modal-settings .settings-body { padding: 8px 20px 24px; }
 
 /* ── Settings tabs ─────────────────────────────────────────────────────────
    A left-to-right strip under the dialog title. Each tab owns the full width
@@ -1790,7 +1789,7 @@ body:has(.modal.is-open) { overflow: hidden; }
      The clearance is asymmetric on purpose: generous ABOVE, to separate the
      strip from the header, and tight BELOW, because the panel is what the
      strip labels and a band of empty space between them just reads as a gap. */
-  margin: 7px 20px 6px;
+  margin: 8px 20px 6px;
   padding: 5px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -1851,7 +1850,10 @@ body:has(.modal.is-open) { overflow: hidden; }
 
 
 /* One panel at a time; sections inside it stack full-width. */
-.settings-panel { display: flex; flex-direction: column; gap: 12px; }
+/* Sections carry the whole vertical rhythm through their own padding, so
+   there is one number to reason about instead of a panel gap stacked on top
+   of section padding. */
+.settings-panel { display: flex; flex-direction: column; gap: 0; }
 .settings-panel[hidden] { display: none; }
 /* Every control in a section spans the panel, so nothing is centred against
    empty space waiting for a neighbour that lives in another tab. */
@@ -1879,6 +1881,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 }
 .modal-body { padding: 8px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
 .modal-help { color: var(--fg-3); font-size: 13px; margin: 0; line-height: 1.5; }
+.settings-section > .modal-input-row { margin-top: 10px; }
 .modal-input-row { display: flex; gap: 8px; align-items: stretch; }
 /* Every control in a modal input row (input, Browse, Add, the input-with-paste
    wrapper) shares the same 40px box, so the row reads as a single horizontal
@@ -2233,7 +2236,7 @@ body:has(.modal.is-open) { overflow: hidden; }
    sit on a real card — so you drag into the result, not into a diagram. The
    badge rows follow the two switches in the section above. */
 .cardbtn-slots-cap {
-  margin: 6px 0 5px;
+  margin: 14px 0 8px;
   font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--fg-4);
 }
@@ -2503,17 +2506,16 @@ body:has(.modal.is-open) { overflow: hidden; }
 
 /* ── Settings sections ───────────────────────────────────────────────────── */
 .settings-section {
-  padding: 12px 0 14px;
+  padding: 18px 0;
   border-bottom: 1px solid var(--border-soft);
 }
 /* No trailing rule and no trailing padding at the foot of a panel — the
    dialog footer already provides that gap, and the 20px was pushing Folders
    five pixels past the pinned body height for a scrollbar nobody needs. */
-.settings-section:last-of-type { border-bottom: 0; padding-bottom: 2px; }
-/* The first section needs almost no top padding: the tab strip is right above
-   it and already supplies the separation, so the section's own 12px was
-   stacking on top of that and opening a band of dead space under the tabs. */
-.settings-panel > .settings-section:first-of-type { padding-top: 4px; }
+.settings-section:last-of-type { border-bottom: 0; padding-bottom: 0; }
+/* The tab strip already separates the first section from everything above it,
+   so that section adds nothing of its own. */
+.settings-panel > .settings-section:first-of-type { padding-top: 0; }
 /* Section label — an eyebrow, not a headline. Uppercase and tracked, so it
    still reads as a heading at a size below the option titles it sits over. */
 .settings-title {
@@ -2526,7 +2528,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   margin: 0 0 6px;
 }
 .settings-help {
-  margin: 0 0 7px;
+  margin: 0 0 12px;
   color: var(--fg-3);
   font-size: 12px;
   line-height: 1.55;
@@ -2542,7 +2544,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 8px 12px;
+  padding: 12px 14px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
@@ -2566,8 +2568,8 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-toggle-group {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  margin-top: 2px;
+  gap: 8px;
+  margin-top: 0;
 }
 /* Label and description share ONE line — "Tech badges – what a project is
    built with" reads as a single sentence, and a stack of two-line options was
