@@ -4976,7 +4976,11 @@ function upgradeSelect(sel) {
   const syncLabel = () => {
     const opt = sel.options[sel.selectedIndex];
     label.textContent = opt ? opt.textContent : "";
-    label.dataset.placeholder = opt && opt.value === "" ? "true" : "false";
+    // Grey means "nothing chosen yet". An empty VALUE does not mean that —
+    // "Let the AI choose" and "Default (Settings)" are real, deliberate picks
+    // that happen to save as "", and greying them made a chosen setting look
+    // unset or disabled. Only a genuinely blank option reads as a placeholder.
+    label.dataset.placeholder = opt && !opt.textContent.trim() ? "true" : "false";
     const dot = opt?.dataset.dot || "";
     btnDot.hidden = !dot;
     if (dot) btnDot.style.background = dot;

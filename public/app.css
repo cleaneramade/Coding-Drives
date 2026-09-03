@@ -1464,6 +1464,9 @@ body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
   background: rgba(8, 8, 12, 0.88);
   backdrop-filter: blur(8px);
   animation: lightbox-in 160ms var(--ease-out);
+  /* Same reason as .modal: its close button sits 20px from the top, inside the
+     titlebar's OS drag strip, where a real click never reaches the page. */
+  -webkit-app-region: no-drag;
 }
 @keyframes lightbox-in { from { opacity: 0; } to { opacity: 1; } }
 .lightbox img {
@@ -1680,6 +1683,17 @@ body.is-card-dragging .card:not(.card-dragging):hover { transform: none; }
   z-index: 100;
   align-items: center; justify-content: center;
   padding: 24px;
+  /* The top 52px of the window is .titlebar, a -webkit-app-region: drag strip.
+     Windows hit-tests that strip in the OS, BEFORE the page ever sees the
+     mouse — so anything painted over it is dead to a real click no matter what
+     its z-index says. A tall dialog is centred and its header lands right in
+     that band, which is why Settings' ✕, "Save changes" and "Reset all" did
+     nothing when clicked while a script clicking the same buttons worked fine.
+     An open modal covers the viewport, so declaring it no-drag subtracts the
+     whole strip from the drag region and every control in the dialog becomes
+     clickable. Dragging the window by a strip that is behind a modal is not a
+     thing anyone wants anyway. */
+  -webkit-app-region: no-drag;
 }
 .modal.is-open { display: flex; }
 /* Lock background scroll while any modal is open so wheel/touch events on
@@ -1708,19 +1722,28 @@ body:has(.modal.is-open) { overflow: hidden; }
   overflow: hidden;
 }
 .modal-lg .modal-card { width: min(640px, 100%); }
-/* ONE height for every tab — the panels differ wildly, and a dialog that
-   resizes on each tab click drags the tab strip up and down under the pointer,
-   so you end up chasing the tab you meant to click next.
+/* Settings is pinned to the TOP of the window rather than centred, and that is
+   what lets each tab be its own height.
 
-   The CARD is what holds that height, and the body simply takes whatever is
-   left over. That matters more than it sounds: the body used to carry a
-   hard-coded height that had to be re-derived by hand every time any padding
-   above it changed, so every spacing tweak turned into an arithmetic problem
-   and got paid for by shaving pixels off something else. Now spacing is free
-   to be whatever it should be, and a tab that overflows simply scrolls. */
+   The old rule froze the card at one tall height for every tab, because a
+   centred dialog that resizes moves its own tab strip up and down under the
+   pointer — you end up chasing the tab you meant to click next. True, but the
+   price was App showing three controls above nine hundred pixels of nothing,
+   and Tasks and Folders each trailing a few hundred. Only Cards, the tallest
+   tab, ever filled it.
+
+   Anchor the card to the top and the header and the tab strip sit at the same
+   y no matter which tab is open, so the card is free to grow and shrink
+   DOWNWARD only. Nothing under the pointer moves, and no tab carries a void.
+   The card still owns its height and the body takes what is left, so a tall
+   tab (Cards) hits the cap and scrolls rather than paying for it in shaved
+   spacing. The floor is only there so a one-control tab still reads as a
+   dialog rather than a popover. */
+#modal-settings { align-items: flex-start; }
 #modal-settings .modal-card {
-  height: min(860px, calc(100vh - 24px));
-  max-height: calc(100vh - 24px);
+  height: auto;
+  min-height: min(300px, calc(100vh - 48px));
+  max-height: calc(100vh - 48px);
 }
 .settings-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* Needs the id: .modal-body sets the shared padding further down the file and
@@ -1768,10 +1791,6 @@ body:has(.modal.is-open) { overflow: hidden; }
   border-color: var(--danger);
   color: #14141a;
 }
-/* Settings sits closer to the window edge than other dialogs — it is the one
-   with five tabs to fit at a single height, and the Cards tab now carries a
-   card preview. Scoped so no other modal grows. */
-#modal-settings .modal-card { max-height: calc(100vh - 24px); }
 
 /* ── Settings tabs ─────────────────────────────────────────────────────────
    A left-to-right strip under the dialog title. Each tab owns the full width
@@ -2545,27 +2564,42 @@ body:has(.modal.is-open) { overflow: hidden; }
 }
 .settings-help em { font-style: normal; color: var(--warning); font-weight: 600; }
 
-/* Toggle row — title + sub-help on the left, switch on the right. The whole
-   label is clickable; the .switch element on the right is a styled wrapper
-   around a real checkbox so accessibility (focus, screen readers, form
-   semantics) still works while the visible control reads as an iOS-style
-   switch. */
-.settings-toggle-row {
+/* ── One row, every tab ────────────────────────────────────────────────────
+   Every setting in this dialog is the same object: a soft-bordered strip,
+   52px tall, the thing on the left and its control on the right, one hover.
+   Cards had it and looked finished; Statuses, Folders and App each invented a
+   smaller, flatter thing of their own, which is the whole reason one tab read
+   as designed and the rest read as leftovers. They share it now, so moving
+   between tabs is the same list with different contents in it.
+
+   A switch is 20px, a segmented picker and a dropdown are taller, and left to
+   themselves they made three row heights in one list — the ROW sets the
+   height and the controls are sized to sit inside it. */
+.settings-toggle-row,
+.status-edit-row,
+#set-scan-paths .path-item,
+.logo-row {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 12px 14px;
-  /* Every option is the same height whatever control sits on its right. A
-     switch is 20px, the segmented picker and the dropdown are taller, and left
-     to themselves they made three different row heights in one list. The row
-     sets the height; the controls are sized to fit inside it. */
+  padding: 10px 14px;
   min-height: 52px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
-.settings-toggle-row:hover { background: rgba(255, 255, 255, 0.035); border-color: var(--border); }
+/* Hover only where there is something to press. The logo row is a strip that
+   holds two buttons, not a control itself. */
+.settings-toggle-row:hover,
+.status-edit-row:hover,
+#set-scan-paths .path-item:hover { background: rgba(255, 255, 255, 0.035); border-color: var(--border); }
+/* Toggle row — title + sub-help on the left, switch on the right. The whole
+   label is clickable; the .switch element on the right is a styled wrapper
+   around a real checkbox so accessibility (focus, screen readers, form
+   semantics) still works while the visible control reads as an iOS-style
+   switch. */
+.settings-toggle-row { padding: 12px 14px; }
 /* The label column takes the leftover width; the control on the right sizes to
    itself. Without this a full-width control (the branded dropdown is
    width:100% by default) eats the whole row and squeezes the description down
@@ -2674,8 +2708,11 @@ body:has(.modal.is-open) { overflow: hidden; }
 }
 
 /* Logo row */
-.logo-row { display: flex; gap: 14px; align-items: center; }
-.logo-actions { display: flex; flex-direction: row; gap: 8px; flex-wrap: wrap; }
+/* App → the logo. The picture on the left, the two buttons on the right, in
+   the same strip a toggle or a status sits in — the three of them used to
+   float naked on the panel, which is what made the App tab look like an
+   unfinished page rather than a short one. */
+.logo-actions { display: flex; flex-direction: row; gap: 8px; flex-wrap: wrap; margin-left: auto; }
 .logo-preview {
   width: 56px; height: 56px;
   border-radius: var(--radius-md);
@@ -2702,6 +2739,31 @@ body:has(.modal.is-open) { overflow: hidden; }
   font-size: 12px;
   color: var(--fg-2);
 }
+/* …except in Settings → Folders, where a scan path is a setting rather than a
+   tag: one per line, in the same strip as every other option in the dialog,
+   the path taking the width it needs and the ✕ parked at the right edge with
+   the controls on every other tab. Two of them wrapped as pills read as
+   loose scraps beside the toggle rows one tab over. Task reference links and
+   the schedule's project chips keep the pill — those are short and there are
+   many, so wrapping is right for them. */
+#set-scan-paths {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+#set-scan-paths .path-item {
+  width: 100%;
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+#set-scan-paths .path-item > span:first-child { flex: 1 1 auto; }
+#set-scan-paths .path-item .remove {
+  width: 26px; height: 26px;
+  margin-left: auto;
+  color: var(--fg-4);
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
 
 /* Status editor — one row per status. The row is the same object every other
    option in Settings is: one soft-bordered strip, one height, the same hover.
@@ -2713,18 +2775,6 @@ body:has(.modal.is-open) { overflow: hidden; }
   display: flex; flex-direction: column; gap: 8px;
   margin-bottom: 12px;
 }
-.status-edit-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 10px 8px 12px;
-  /* The same 52px as .settings-toggle-row, so a status sits at the height of
-     an option on any other tab and the tabs share one rhythm. */
-  min-height: 52px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
-  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
-}
-.status-edit-row:hover { background: rgba(255, 255, 255, 0.035); border-color: var(--border); }
 /* Editing lights the whole row, not just the field inside it — the row is the
    unit you are working on. */
 .status-edit-row:focus-within,
@@ -2821,23 +2871,30 @@ body:has(.modal.is-open) { overflow: hidden; }
   flex: none;
 }
 .path-item .remove:hover { color: var(--danger); background: rgba(248,113,113,0.10); }
+/* Excludes stay chips — they are one-word folder names and there are a dozen,
+   so a wrapping row is the right shape. They just sit at the same height and
+   the same weight as everything else now, instead of being a size smaller. */
 .exclude-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 4px 4px 10px;
-  font-size: 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 32px;
+  padding: 4px 5px 4px 12px;
+  font-size: 12.5px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-pill);
   color: var(--fg-2);
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
+.exclude-chip:hover { background: rgba(255, 255, 255, 0.035); border-color: var(--border); }
 .exclude-chip .remove {
   background: transparent;
   border: 0;
-  color: var(--fg-3);
+  color: var(--fg-4);
   cursor: pointer;
-  width: 18px; height: 18px;
+  width: 22px; height: 22px;
   border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
 .exclude-chip .remove:hover { color: var(--danger); background: rgba(248,113,113,0.10); }
 
