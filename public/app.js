@@ -604,7 +604,10 @@ function bucketCards(cardEls) {
   // it is never what the user ends up seeing when there is more than one
   // column of cards.
   cardEls.forEach((el, i) => cols[i % masonryCols].appendChild(el));
-  if (masonryCols < 2 || cardEls.length <= masonryCols) return;
+  if (masonryCols < 2 || cardEls.length <= masonryCols) {
+    requestAnimationFrame(syncAllTaskListFades);
+    return;
+  }
 
   // Pass 2 — measure, then greedily re-home each card into whichever column
   // is currently SHORTEST. All the reads happen before all the writes, so
@@ -624,6 +627,9 @@ function bucketCards(cardEls) {
     cols[best].appendChild(el);
     filled[best] += heights[i] + MASONRY_GAP;
   });
+  // The cards now have real boxes — settle every scrollable task list's edge
+  // fades against their actual heights.
+  requestAnimationFrame(syncAllTaskListFades);
 }
 
 // Phone-home-screen push-over: FLIP-animate every card from its old spot to
@@ -1170,6 +1176,33 @@ function renderLanguages(node, p) {
 // Expansion survives re-renders via expandedTaskCards.
 const TASK_VISIBLE_MAX = 5;
 const expandedTaskCards = new Set(); // slugs whose full task list is expanded
+// Slugs whose completed block should animate in on the NEXT render only —
+// set by the expander click, cleared as soon as it's used, so a background
+// poll repaint never replays the animation.
+const revealTaskCards = new Set();
+
+// Show a fade only on the edge that actually has more content past it, and
+// cross-fade it in and out. A permanently-on bottom gradient (what a static
+// mask-image gives you) sits there fading the last row even when the list is
+// already at the end, which is what made the collapsed list look cheap.
+// Called after the grid is populated, because renderTasks itself runs while
+// the card is still DETACHED (buildCard assembles it, bucketCards appends it),
+// where every height reads 0. Measuring there left the bottom fade off, so a
+// scrollable to-do list gave no "more below" cue until you happened to scroll
+// it. This is the first moment the rows have a real box.
+function syncAllTaskListFades() {
+  for (const frame of grid.querySelectorAll(".task-list-frame")) {
+    const list = frame.querySelector(".task-list");
+    if (list) syncTaskListFades(list, frame);
+  }
+}
+
+function syncTaskListFades(list, frame) {
+  const max = list.scrollHeight - list.clientHeight;
+  const scrollable = max > 2;
+  frame.dataset.fadeTop = scrollable && list.scrollTop > 2 ? "on" : "off";
+  frame.dataset.fadeBottom = scrollable && list.scrollTop < max - 2 ? "on" : "off";
+}
 
 // Lifecycle is mostly automatic: the only manual input is the done-toggle
 // (the mark). "in-progress" is set by the app on send, "complete"/"failed"
@@ -1206,6 +1239,7 @@ function refreshCard(slug) {
   const orderIdx = gridCardOrder.indexOf(cardEl);
   if (orderIdx !== -1) gridCardOrder[orderIdx] = fresh;
   cardEl.replaceWith(fresh);
+  requestAnimationFrame(syncAllTaskListFades);
   return fresh;
 }
 
@@ -1384,6 +1418,18 @@ function renderTasks(node, p) {
   // mixed in with what's already finished.
   list.textContent = "";
   for (const t of open) list.appendChild(buildTaskRow(p, t));
+  // Completed history reads newest-first: the thing you finished a minute ago
+  // is the one you want to see, not the one from six weeks ago. Falls back
+  // through reportedAt → updatedAt → createdAt so a row missing a timestamp
+  // still lands somewhere sensible instead of jumping to the top.
+  const doneAt = (t) => {
+    for (const k of ["reportedAt", "updatedAt", "createdAt"]) {
+      const n = Date.parse(t[k] || "");
+      if (Number.isFinite(n)) return n;
+    }
+    return 0;
+  };
+  done.sort((a, b) => doneAt(b) - doneAt(a));
   if (expanded && done.length) {
     const sep = document.createElement("li");
     sep.className = "task-group-sep";
@@ -1394,7 +1440,36 @@ function renderTasks(node, p) {
   }
   list.hidden = open.length === 0 && !(expanded && done.length);
   // Only the collapsed to-do list is height-capped; expanded shows everything.
-  list.classList.toggle("task-list-scroll", !expanded && open.length > TASK_VISIBLE_MAX);
+  const scrolls = !expanded && open.length > TASK_VISIBLE_MAX;
+  list.classList.toggle("task-list-scroll", scrolls);
+  const frame = list.closest(".task-list-frame");
+  if (frame) {
+    frame.hidden = list.hidden;
+    // renderTasks runs while the card is still DETACHED (buildCard assembles it
+    // before bucketCards appends it), so every height here reads 0 and the
+    // fades would start off — no "more below" cue until the user happened to
+    // scroll. Measure again on the next frame, once the card is really in the
+    // grid.
+    if (!list._cdFadeBound) {
+      list._cdFadeBound = true;
+      list.addEventListener("scroll", () => syncTaskListFades(list, frame), { passive: true });
+    }
+  }
+  // Rows revealed by expanding get a short staggered rise. Only on the pass
+  // that follows the click — a poll repaint mustn't re-run the animation and
+  // make an idle card twitch every 8 seconds.
+  if (expanded && done.length && revealTaskCards.has(p.slug)) {
+    revealTaskCards.delete(p.slug);
+    const revealed = [...list.children].slice(open.length);
+    revealed.forEach((el, i) => {
+      el.classList.add("task-revealing");
+      el.style.animationDelay = `${Math.min(i, 8) * 26}ms`;
+      el.addEventListener("animationend", () => {
+        el.classList.remove("task-revealing");
+        el.style.animationDelay = "";
+      }, { once: true });
+    });
+  }
 
   // Drag-and-drop: live-move the dragged row to wherever the pointer sits;
   // the row's dragend handler persists the resulting DOM order.
@@ -1420,13 +1495,27 @@ function renderTasks(node, p) {
     more.classList.add("expanded");
     more.innerHTML = `<span>Show less</span>${TASK_CHEVRON_SVG}`;
     more.setAttribute("aria-expanded", "true");
-    more.onclick = () => { expandedTaskCards.delete(p.slug); refreshCard(p.slug); };
+    more.onclick = () => {
+      // Fade the completed block out before the card rebuilds, so collapsing
+      // is a movement rather than rows blinking out of existence.
+      const rows = [...list.children].slice(open.length);
+      if (!rows.length) { expandedTaskCards.delete(p.slug); refreshCard(p.slug); return; }
+      rows.forEach((el, i) => {
+        el.classList.add("task-hiding");
+        el.style.animationDelay = `${Math.min(rows.length - 1 - i, 8) * 18}ms`;
+      });
+      setTimeout(() => { expandedTaskCards.delete(p.slug); refreshCard(p.slug); }, 190);
+    };
   } else if (hiddenCount > 0) {
     more.hidden = false;
     more.classList.remove("expanded");
     more.innerHTML = `<span>${hiddenCount} done</span>${TASK_CHEVRON_SVG}`;
     more.setAttribute("aria-expanded", "false");
-    more.onclick = () => { expandedTaskCards.add(p.slug); refreshCard(p.slug); };
+    more.onclick = () => {
+      expandedTaskCards.add(p.slug);
+      revealTaskCards.add(p.slug);
+      refreshCard(p.slug);
+    };
   } else {
     more.hidden = true;
   }
@@ -3380,6 +3469,10 @@ function openSettings() {
       openTaskEditorOnCreate: cfg.openTaskEditorOnCreate !== false,
       // Per-agent model override. Empty string = the CLI's own default.
       taskModels: { claude: "", codex: "", ...(cfg.taskModels || {}) },
+      // Claude Code Remote Control — off unless asked for, because pairing a
+      // brand-new session could itself prompt, which is the last thing an
+      // unattended background run needs.
+      remoteControl: cfg.remoteControl === true,
       // Which AI CLI the task send buttons launch. Claude unless opted out.
       taskAgent: cfg.taskAgent === "codex" ? "codex" : "claude",
       // The three card action buttons ({ tool, mode? } each). The server
@@ -3451,6 +3544,11 @@ document.getElementById("set-headless-terminals")?.addEventListener("change", (e
 // Open the full task editor right after a card's quick-add names a task.
 document.getElementById("set-open-task-editor")?.addEventListener("change", (e) => {
   if (settingsState) settingsState.openTaskEditorOnCreate = e.target.checked;
+});
+// Remote Control — launches sessions with Claude Code's --remote-control so
+// they can be driven from the phone app.
+document.getElementById("set-remote-control")?.addEventListener("change", (e) => {
+  if (settingsState) settingsState.remoteControl = e.target.checked;
 });
 // ── Agent model picker ────────────────────────────────────────────────────
 // Which model the chosen agent runs. "Default" sends no --model flag at all,
@@ -3663,6 +3761,8 @@ function renderSettings() {
   if (headlessEl) headlessEl.checked = !!settingsState.headlessTerminals;
   const openEditorEl = document.getElementById("set-open-task-editor");
   if (openEditorEl) openEditorEl.checked = !!settingsState.openTaskEditorOnCreate;
+  const remoteEl = document.getElementById("set-remote-control");
+  if (remoteEl) remoteEl.checked = !!settingsState.remoteControl;
   // Task agent segment
   setTaskAgentSegment(settingsState.taskAgent);
   renderTaskModelSelect();
@@ -3960,6 +4060,7 @@ document.getElementById("set-save").addEventListener("click", async () => {
     headlessTerminals: !!settingsState.headlessTerminals,
     openTaskEditorOnCreate: !!settingsState.openTaskEditorOnCreate,
     taskModels: settingsState.taskModels,
+    remoteControl: !!settingsState.remoteControl,
     taskAgent: settingsState.taskAgent === "codex" ? "codex" : "claude",
     cardButtons: sanitizeCardButtons(settingsState.cardButtons),
     // Legacy mirrors of the slot modes — other server paths (and any older

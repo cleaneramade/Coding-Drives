@@ -1080,14 +1080,72 @@ body[data-show-language-badges="false"] .card-row-langs { display: none !importa
 /* Collapsed with more to-dos than fit: the LIST scrolls rather than the card
    growing, so every open task is reachable for a quick reference without
    expanding the whole history. ~5 rows tall; scrollbars are hidden app-wide,
-   and the mask fades the last row so there's a visible "more below" cue. */
+   so the edge fades are the only "there's more" cue — see .task-list-frame. */
 .task-list-scroll {
   max-height: 224px;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%);
-          mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%);
+}
+
+/* ── Task list edge fades ──────────────────────────────────────────────────
+   Two overlays instead of a mask-image. A mask can't be transitioned, so the
+   old version had a hard bottom gradient that was always on — it dimmed the
+   last row even at the end of the list and snapped on and off when the list
+   grew past the cap. These cross-fade on scroll, and only the edge that
+   actually has content past it is lit (syncTaskListFades in app.js). */
+.task-list-frame { position: relative; min-width: 0; }
+.task-list-frame[hidden] { display: none; }
+.task-list-frame::before,
+.task-list-frame::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  height: 34px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms var(--ease-out);
+  z-index: 1;
+}
+.task-list-frame::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--surface-solid), transparent);
+}
+.task-list-frame::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--surface-solid), transparent);
+}
+.task-list-frame[data-fade-top="on"]::before,
+.task-list-frame[data-fade-bottom="on"]::after { opacity: 1; }
+
+/* ── Task row reveal / hide ────────────────────────────────────────────────
+   Expanding the completed history used to pop a block of rows into place and
+   collapsing blinked them out. Both now move: a short staggered rise on the
+   way in, a tighter fall on the way out (the card rebuild waits for it). Out
+   is quicker than in — leaving should feel decisive, arriving unhurried. */
+@keyframes task-row-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes task-row-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-4px) scale(0.99); }
+}
+.task-item.task-revealing,
+.task-group-sep.task-revealing {
+  animation: task-row-in 260ms var(--ease-out) both;
+}
+.task-item.task-hiding,
+.task-group-sep.task-hiding {
+  animation: task-row-out 170ms var(--ease-out) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-item.task-revealing,
+  .task-group-sep.task-revealing,
+  .task-item.task-hiding,
+  .task-group-sep.task-hiding { animation: none; }
+  .task-list-frame::before,
+  .task-list-frame::after { transition: none; }
 }
 /* Divider between the to-do list and the completed history in the expanded
    view — the two are different things and shouldn't read as one list. */
@@ -2232,6 +2290,17 @@ body:has(.modal.is-open) { overflow: hidden; }
   align-items: center;
   gap: 16px;
 }
+/* The label column takes the leftover width; the control on the right sizes to
+   itself. Without this a full-width control (the branded dropdown is
+   width:100% by default) eats the whole row and squeezes the description down
+   to one word per line. */
+.settings-toggle-row > .settings-toggle-label { flex: 1 1 auto; min-width: 0; }
+.settings-toggle-row > .cdsel,
+.settings-toggle-row > .cd-select { flex: 0 0 auto; width: 210px; }
+/* …except in a stacked row, where the control sits under the label and should
+   span the panel. */
+.settings-row-stack > .cdsel,
+.settings-row-stack > .cd-select { width: 100%; }
 /* When a section hosts several toggle rows (Card display → tech badges +
    language badges), space them so each row reads as its own option without
    needing per-row borders. */

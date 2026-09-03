@@ -1204,6 +1204,8 @@ app.get("/api/projects", asyncRoute(async (_req, res) => {
     // Per-agent model override (Settings → Tasks → Model). Empty = the CLI's
     // own default.
     taskModels: cfg.taskModels || {},
+    // Claude Code Remote Control — steer a running session from the phone app.
+    remoteControl: cfg.remoteControl === true,
     // The three card action buttons (Settings → "Card buttons"): each slot
     // is { tool, mode? } — the frontend paints the buttons from this and
     // passes the slot's mode back when opening, so Claude/Codex buttons know
@@ -1506,7 +1508,26 @@ app.post("/api/projects/:slug/tasks", async (req, res) => {
 // command uses query params + --data-urlencode because that survives every
 // shell the agent might run it from (cmd, PowerShell, bash) without JSON
 // quoting gymnastics.
-function buildTaskPrompt(slug, tasks, port) {
+// Prepended to a task prompt whenever the session runs headless. Flags alone
+// don't stop an agent asking — a permission flag covers TOOL prompts, not the
+// agent's own decision to stop and ask a clarifying question. In a hidden
+// window that reads as the task silently doing nothing, which is exactly what
+// the user hit: twelve tasks dispatched to the background, half a dozen stops
+// waiting on an answer nobody could see.
+const UNATTENDED_PREAMBLE = [
+  "You are running UNATTENDED in a hidden background terminal. Nobody is",
+  "watching this window and nobody can answer you.",
+  "",
+  "- Never stop to ask a question, request confirmation, or wait for input.",
+  "- When something is ambiguous, choose the most reasonable interpretation,",
+  "  say which assumption you made, and keep going.",
+  "- If one part is genuinely blocked, finish everything else, then report that",
+  "  part as failed with the reason.",
+  "- Do not ask for permission before running commands or editing files.",
+  "",
+].join("\n");
+
+function buildTaskPrompt(slug, tasks, port, { unattended = false } = {}) {
   // Structured, multi-line prompt — delivered via spawnAiPrompt's file relay,
   // so newlines and any characters in user text arrive verbatim. Shape:
   //   TASK: <title>
@@ -1533,6 +1554,7 @@ function buildTaskPrompt(slug, tasks, port) {
     const links = linksOf(t);
     const imgPath = imageOf(t);
     return [
+      ...(unattended ? [UNATTENDED_PREAMBLE] : []),
       "Complete the following task in the current project directory.",
       "",
       "TASK: " + titleOf(t),
@@ -1561,6 +1583,7 @@ function buildTaskPrompt(slug, tasks, port) {
       (imgPath ? `\nREFERENCE IMAGE (open and view this file on disk):\n${imgPath}` : "");
   }).join("\n\n");
   return [
+    ...(unattended ? [UNATTENDED_PREAMBLE] : []),
     "Work through the following tasks IN ORDER, one at a time, in the current project directory.",
     "",
     blocks,
@@ -1640,8 +1663,9 @@ app.post("/api/projects/:slug/tasks/send", async (req, res) => {
 
   try {
     ensureFolderTrusted(folder, cliKey);
-    spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, sent, cfg.port), cliKey, {
-      headless: cfg.headlessTerminals === true,
+    const unattended = cfg.headlessTerminals === true;
+    spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, sent, cfg.port, { unattended }), cliKey, {
+      headless: unattended,
       slug,
       // The session owns these tasks: if it dies without reporting, they are
       // settled rather than left spinning until the staleness sweep.
@@ -2267,8 +2291,9 @@ async function fireSchedule(sched) {
       });
 
       ensureFolderTrusted(folder, cliKey);
-      spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, [task], cfg.port), cliKey, {
-        headless: cfg.headlessTerminals === true,
+      const unattended = cfg.headlessTerminals === true;
+      spawnAiPrompt(folder, cliExecutable, buildTaskPrompt(slug, [task], cfg.port, { unattended }), cliKey, {
+        headless: unattended,
         slug,
         taskIds: [task.id],
       });
@@ -3070,9 +3095,29 @@ function newSessionId() {
 // already-running Windows Terminal process when one exists, so the new tab's
 // shell inherits THAT process's environment, not ours. Doing it in the command
 // line is the only place that always wins.
-function sessionMarkerPS(id) {
+//
+// For the PowerShell path that means a SCRIPT FILE, never an inline -Command:
+// Windows Terminal treats `;` on its own command line as a subcommand (new-tab)
+// delimiter, so a multi-statement -Command is silently truncated at the first
+// semicolon — the tab opens to a PowerShell that set an environment variable
+// and did nothing else. (openHeadlessSessionTerminals learned this the same
+// way.) The session id rides in the FILE NAME so the process command line
+// still carries it for the liveness probe.
+function writeSessionLauncher(id, body) {
+  const file = path.join(DATA_DIR, `task-launch-CDSID-${id}.ps1`);
   const clear = INHERITED_SESSION_VARS.map((v) => `Env:${v}`).join(",");
-  return `$env:CDSID='${id}'; Remove-Item ${clear} -ErrorAction SilentlyContinue; `;
+  const script =
+    `$env:CDSID = '${id}'
+` +
+    `Remove-Item ${clear} -ErrorAction SilentlyContinue
+` +
+    `${body}
+`;
+  // Leading BOM so Windows PowerShell 5.1 decodes the em-dashes / emoji that
+  // show up in project paths.
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(file, "﻿" + script, "utf8");
+  return file;
 }
 function sessionMarkerCmd(id) {
   const clear = INHERITED_SESSION_VARS.map((v) => `set "${v}="& `).join("");
@@ -3125,7 +3170,7 @@ foreach ($p in $procs) { $byId[[uint32]$p.ProcessId] = $p }
 $out = New-Object System.Collections.ArrayList
 foreach ($p in $procs) {
   if (-not $p.CommandLine) { continue }
-  $m = [regex]::Match($p.CommandLine, 'CDSID=[''"]?([a-z0-9]+)')
+  $m = [regex]::Match($p.CommandLine, 'CDSID[-=][''"]?([a-z0-9]+)')
   if (-not $m.Success) { continue }
   # Walk up to the Windows Terminal window hosting this pane. The chain is
   # WindowsTerminal.exe -> OpenConsole.exe -> the shell, so a few hops is
@@ -3302,43 +3347,72 @@ function spawnTrackedTerminal(folder, cmd, { slug, agent }) {
 // own marker) avoids minimizing some unrelated wt window the user opens in the
 // same few seconds. Stops early once it has been confirmed minimized twice in a
 // row. Fire-and-forget: spawns a hidden, detached PowerShell and returns at once.
-function minimizeNewWtWindow(baseline, basename) {
-  const base = String(basename || "").toLowerCase().replace(/'/g, "''");
+function minimizeNewWtWindow(baseline, basename, sessionId = "") {
   const baseList = (Array.isArray(baseline) ? baseline : [])
     .map((h) => String(h).replace(/[^0-9-]/g, ""))
     .filter(Boolean)
     .map((h) => `'${h}'`)
     .join(",");
+  const sid = String(sessionId || "").replace(/[^A-Za-z0-9]/g, "");
   const scriptBody =
 `Add-Type @"
 using System;using System.Collections.Generic;using System.Runtime.InteropServices;using System.Text;
 public class CDMinW{
  public delegate bool EP(IntPtr h,IntPtr l);
  [DllImport("user32.dll")] public static extern bool EnumWindows(EP cb,IntPtr l);
- [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int n);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
- public static List<IntPtr> All(){var r=new List<IntPtr>();EnumWindows((h,l)=>{if(IsWindowVisible(h))r.Add(h);return true;},IntPtr.Zero);return r;}
+ public static List<IntPtr> All(){var r=new List<IntPtr>();EnumWindows((h,l)=>{r.Add(h);return true;},IntPtr.Zero);return r;}
  public static uint Pid(IntPtr h){uint p;GetWindowThreadProcessId(h,out p);return p;}
  public static string T(IntPtr h){var s=new StringBuilder(512);GetWindowText(h,s,512);return s.ToString();}
 }
 "@
+# Identify the session's window by PROCESS LINEAGE, not by its title.
+#
+# Titles are hopeless here: Claude/Codex rename their tab within a second of
+# starting (--suppressApplicationTitle does not always hold), so a title match
+# is racing the CLI. And the pre-launch handle snapshot alone is not enough
+# either — it is gathered by spawning a PowerShell, so it can be a second
+# stale, and a window that slipped into it was skipped forever, which is
+# exactly how a "headless" session ended up opening full-size.
+#
+# The launcher script's own path carries the session id, so: find that
+# PowerShell, walk up to its WindowsTerminal ancestor, and minimize that
+# process's window(s) that were not already open before we launched. Both
+# halves are facts, and neither can be renamed.
 $baseline = @(${baseList || "''"})
-$base = '${base}'
+$sid = '${sid}'
 $done = 0
-for($i=0; $i -lt 45 -and $done -lt 2; $i++){
+for($i=0; $i -lt 100 -and $done -lt 3; $i++){
   Start-Sleep -Milliseconds 200
-  $wt=@{}; Get-Process WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object { $wt[[uint32]$_.Id]=$true }
-  foreach($h in [CDMinW]::All()){
-    if(-not $wt.ContainsKey([uint32][CDMinW]::Pid($h))){ continue }
-    if($baseline -contains $h.ToInt64().ToString()){ continue }
-    $t = ([CDMinW]::T($h)).ToLower()
-    if((($base.Length -gt 0) -and $t.Contains($base)) -or $t.Contains('claude') -or $t.Contains('codex') -or $t.Contains('background')){
-      if([CDMinW]::IsIconic($h)){ $done++ } else { [CDMinW]::ShowWindow($h,6) | Out-Null; $done=0 }
+  $procs = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='WindowsTerminal.exe' OR Name='OpenConsole.exe'"
+  $byId = @{}
+  foreach($p in $procs){ $byId[[uint32]$p.ProcessId] = $p }
+  $wtPids = @{}
+  foreach($p in $procs){
+    if(-not $p.CommandLine){ continue }
+    if($sid.Length -gt 0 -and -not $p.CommandLine.Contains($sid)){ continue }
+    if($sid.Length -eq 0){ continue }
+    $cur = $p; $hops = 0
+    while($cur -and $hops -lt 8){
+      if($cur.Name -eq 'WindowsTerminal.exe'){ $wtPids[[uint32]$cur.ProcessId] = $true; break }
+      $cur = $byId[[uint32]$cur.ParentProcessId]; $hops++
     }
   }
+  if($wtPids.Count -eq 0){ continue }
+  $seen = $false
+  foreach($h in [CDMinW]::All()){
+    if(-not $wtPids.ContainsKey([uint32][CDMinW]::Pid($h))){ continue }
+    if(([CDMinW]::T($h)) -eq ''){ continue }
+    if($baseline -contains $h.ToInt64().ToString()){ continue }
+    $seen = $true
+    if([CDMinW]::IsIconic($h)){ continue }
+    [CDMinW]::ShowWindow($h,6) | Out-Null
+    $done = -1        # it was still up — restart the confirmation count
+  }
+  if($seen){ $done++ }
 }
 `;
   let scriptFile;
@@ -3471,6 +3545,35 @@ const AI_AUTONOMY_FLAGS = {
   codex: "--dangerously-bypass-approvals-and-sandbox",
   gemini: "--yolo",
 };
+
+// UNATTENDED autonomy — used only for headless background sessions, where
+// nobody is watching the window and a permission prompt is a session that has
+// silently stopped. `--permission-mode bypassPermissions` still leaves Claude
+// Code a small set of prompts it will surface; `--dangerously-skip-permissions`
+// leaves none, which is the whole point of dispatching work to a hidden
+// terminal. A VISIBLE session keeps the softer flag — the window is right
+// there, so being asked costs nothing.
+const AI_UNATTENDED_FLAGS = {
+  claude: "--dangerously-skip-permissions",
+  codex: "--dangerously-bypass-approvals-and-sandbox",
+  gemini: "--yolo",
+};
+function autonomyFlags(cliKey, unattended) {
+  const table = unattended ? AI_UNATTENDED_FLAGS : AI_AUTONOMY_FLAGS;
+  return table[cliKey] || AI_AUTONOMY_FLAGS[cliKey] || "";
+}
+
+// Settings → Tasks → "Remote control". Claude Code can expose a running
+// session to the Claude mobile app so it can be steered from a phone — which
+// is most useful for exactly the sessions you can't see, the headless ones.
+// Named after the project so several sessions are tellable apart on the phone.
+// Codex has no per-session equivalent (its `remote-control` is a daemon
+// subcommand, not a session flag), so this only applies to Claude.
+function remoteControlFlag(cliKey, cfg, folder) {
+  if (cliKey !== "claude" || cfg?.remoteControl !== true) return "";
+  const name = String(path.basename(folder || "") || "session").replace(/["']/g, "");
+  return `--remote-control "${name}"`;
+}
 
 // Settings → Tasks → "Model". Empty means "whatever the CLI is already set to",
 // which stays the default so an existing install behaves exactly as before.
@@ -3680,7 +3783,7 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       // doesn't prompt, and --yolo pre-grants the per-action approvals.
       spawnTrackedTerminal(
         folder,
-        [cliCommandLine(resolveCliPath(cfg.tools.gemini || "gemini")), AI_AUTONOMY_FLAGS.gemini, modelFlagFor("gemini", cfg)].filter(Boolean).join(" "),
+        [cliCommandLine(resolveCliPath(cfg.tools.gemini || "gemini")), autonomyFlags("gemini", false), modelFlagFor("gemini", cfg), remoteControlFlag("gemini", cfg, folder)].filter(Boolean).join(" "),
         { slug: req.params.slug, agent: "gemini" }
       );
     } else if (tool === "claude") {
@@ -3692,7 +3795,7 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       } else {
         spawnTrackedTerminal(
           folder,
-          [cliCommandLine(resolveCliPath(cfg.tools.claude || "claude")), AI_AUTONOMY_FLAGS.claude, modelFlagFor("claude", cfg)].filter(Boolean).join(" "),
+          [cliCommandLine(resolveCliPath(cfg.tools.claude || "claude")), autonomyFlags("claude", false), modelFlagFor("claude", cfg), remoteControlFlag("claude", cfg, folder)].filter(Boolean).join(" "),
           { slug: req.params.slug, agent: "claude" }
         );
       }
@@ -3705,7 +3808,7 @@ app.post("/api/projects/:slug/open", async (req, res) => {
       } else {
         spawnTrackedTerminal(
           folder,
-          [cliCommandLine(resolveCliPath(cfg.tools.codex || "codex")), AI_AUTONOMY_FLAGS.codex, modelFlagFor("codex", cfg)].filter(Boolean).join(" "),
+          [cliCommandLine(resolveCliPath(cfg.tools.codex || "codex")), autonomyFlags("codex", false), modelFlagFor("codex", cfg), remoteControlFlag("codex", cfg, folder)].filter(Boolean).join(" "),
           { slug: req.params.slug, agent: "codex" }
         );
       }
@@ -5270,7 +5373,8 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
   // Prune relay files + headless session logs from earlier sends (older than an hour).
   try {
     for (const f of fs.readdirSync(DATA_DIR)) {
-      if (!/^task-prompt-.*\.txt$/.test(f) && !/^task-session-.*\.log$/.test(f) && !/^task-min-.*\.ps1$/.test(f)) continue;
+      if (!/^task-prompt-.*\.txt$/.test(f) && !/^task-session-.*\.log$/.test(f) &&
+          !/^task-min-.*\.ps1$/.test(f) && !/^task-launch-.*\.ps1$/.test(f)) continue;
       const full = path.join(DATA_DIR, f);
       try {
         if (Date.now() - fs.statSync(full).mtimeMs > 60 * 60 * 1000) fs.unlinkSync(full);
@@ -5299,9 +5403,16 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
     // the taskbar instead of grabbing focus. Folder trust is pre-seeded by
     // ensureFolderTrusted before we get here, so the interactive CLI (no `-p`)
     // never stops on the trust prompt.
-    const flags = [AI_AUTONOMY_FLAGS[cliKey] || "", modelFlagFor(cliKey, loadConfig())].filter(Boolean).join(" ");
-    const ps = sessionMarkerPS(sessionId) +
-      `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
+    const cfgNow = loadConfig();
+    const flags = [
+      autonomyFlags(cliKey, true),                      // headless = unattended
+      modelFlagFor(cliKey, cfgNow),
+      remoteControlFlag(cliKey, cfgNow, folder),
+    ].filter(Boolean).join(" ");
+    const launcher = writeSessionLauncher(
+      sessionId,
+      `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`
+    );
     const base = sessionBase;
     // Snapshot the open wt windows BEFORE launching, then open a fresh window
     // (-w new) and minimize whichever window is new. Identifying it by handle
@@ -5312,15 +5423,19 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
     // title by basename), exactly like a visible session.
     captureWtWindows((baseline) => {
       try {
+        // start /MIN asks Windows to open the new window minimized, so a
+        // headless session never flashes up and steals focus. wt can still
+        // hand off to an existing terminal process, in which case /MIN does
+        // nothing — minimizeNewWtWindow below is the belt to that braces.
         spawn(
           "cmd.exe",
-          ["/c", "start", "", "wt.exe", "-w", "new", "-d", folder,
+          ["/c", "start", "/MIN", "", "wt.exe", "-w", "new", "-d", folder,
            "--title", base, "--suppressApplicationTitle",
-           "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+           "powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcher],
           { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
         ).unref();
       } catch {}
-      minimizeNewWtWindow(baseline, base);
+      minimizeNewWtWindow(baseline, base, sessionId);
     });
     return;
   }
@@ -5331,9 +5446,16 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
   // when the session badge raises several windows at once (double-quotes
   // stripped so the title can't break out of wt's argument). Snapshot-then-spawn
   // so the new window's handle gets filed under this slug for the badge's raise.
-  const flags = [AI_AUTONOMY_FLAGS[cliKey] || "", modelFlagFor(cliKey, loadConfig())].filter(Boolean).join(" ");
-  const ps = sessionMarkerPS(sessionId) +
-    `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`;
+  const cfgVisible = loadConfig();
+  const flags = [
+    autonomyFlags(cliKey, false),                       // visible = you're watching
+    modelFlagFor(cliKey, cfgVisible),
+    remoteControlFlag(cliKey, cfgVisible, folder),
+  ].filter(Boolean).join(" ");
+  const launcher = writeSessionLauncher(
+    sessionId,
+    `& ${psQuote(exe)} (Get-Content -Raw -LiteralPath ${psQuote(file)})${flags ? " " + flags : ""}`
+  );
   const winTitle = sessionBase;
   captureWtWindows((baseline) => {
     try {
@@ -5341,7 +5463,7 @@ function spawnAiPrompt(folder, cliExecutable, prompt, cliKey, { headless = false
         "cmd.exe",
         ["/c", "start", "", "wt.exe", "-d", folder,
          "--title", winTitle, "--suppressApplicationTitle",
-         "powershell", "-NoExit", "-NoProfile", "-Command", ps],
+         "powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcher],
         { detached: true, stdio: "ignore", windowsHide: true, shell: false, env: cleanChildEnv() }
       ).unref();
     } catch {}

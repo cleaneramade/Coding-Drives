@@ -231,6 +231,16 @@
               </div>
               <div class="settings-toggle-row">
                 <div class="settings-toggle-label">
+                  <span class="settings-toggle-title">Remote control</span>
+                  <p class="settings-help">Steer a running session from the Claude phone app. Claude Code only.</p>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="set-remote-control" aria-label="Remote control" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </span>
+              </div>
+              <div class="settings-toggle-row">
+                <div class="settings-toggle-label">
                   <span class="settings-toggle-title">Send tasks with</span>
                   <p class="settings-help">Which agent the task send buttons launch.</p>
                 </div>
@@ -559,7 +569,13 @@
             <button class="task-more" type="button" hidden></button>
           </div>
         </div>
-        <ul class="task-list" role="list"></ul>
+        <!-- The frame is the positioned parent for the top/bottom scroll
+             fades; the list itself is what scrolls. Keeping them separate is
+             what lets the fades cross-fade smoothly (opacity transitions)
+             rather than snapping the way a mask-image would. -->
+        <div class="task-list-frame">
+          <ul class="task-list" role="list"></ul>
+        </div>
         <!-- Inline quick-add input. Clicking "Add task" (now up in the head)
              hides that button and reveals this full-width row in its place. -->
         <div class="task-add">
