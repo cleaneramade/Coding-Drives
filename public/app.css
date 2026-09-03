@@ -1717,7 +1717,51 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-body {
   overflow-y: auto;
   flex: 0 0 auto;
-  height: min(760px, calc(100vh - 196px));
+  /* No footer any more, so the body claims that height: the cap allows for
+     the header, the tab strip and the 32px the card keeps off the viewport. */
+  height: min(760px, calc(100vh - 128px));
+}
+
+/* ── Settings header actions ─────────────────────────────────────────────
+   Save and Reset sit in the header, left of the close button, at a size that
+   belongs beside a 28px icon button rather than a footer's worth of chrome.
+   There is no Cancel: ✕ and a backdrop click both already close without
+   saving. */
+.set-head-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 28px;
+  padding: 0 11px;
+  font: inherit; font-size: 12px; font-weight: 600;
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              color var(--dur) var(--ease-out);
+}
+.set-head-btn:hover { background: var(--surface-3); color: var(--fg-1); }
+.set-head-btn:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: 2px; }
+.set-head-btn-brand {
+  background: var(--brand-500);
+  border-color: var(--brand-500);
+  color: #fff;
+}
+.set-head-btn-brand:hover { background: var(--brand-400, #8b6dff); border-color: var(--brand-400, #8b6dff); color: #fff; }
+/* Armed reset: says what the next click does, and looks like it means it.
+   Disarms itself after a few seconds, so a stray click costs nothing. */
+.set-head-btn[data-armed="true"] {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.set-head-btn[data-armed="true"]:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #14141a;
 }
 /* Settings sits closer to the window edge than other dialogs — it is the one
    with five tabs to fit at a single height, and the Cards tab now carries a
@@ -1762,7 +1806,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-tab:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: -2px; }
 
 /* One panel at a time; sections inside it stack full-width. */
-.settings-panel { display: flex; flex-direction: column; gap: 16px; }
+.settings-panel { display: flex; flex-direction: column; gap: 14px; }
 .settings-panel[hidden] { display: none; }
 /* Every control in a section spans the panel, so nothing is centred against
    empty space waiting for a neighbour that lives in another tab. */
@@ -2134,7 +2178,7 @@ body:has(.modal.is-open) { overflow: hidden; }
    sit on a real card — so you drag into the result, not into a diagram. The
    badge rows follow the two switches in the section above. */
 .cardbtn-slots-cap {
-  margin: 12px 0 7px;
+  margin: 8px 0 6px;
   font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--fg-4);
 }
@@ -2163,7 +2207,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   position: relative;
   display: grid;
   justify-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
   padding: 9px 10px 10px;
   background: rgba(255, 255, 255, 0.02);
@@ -2404,7 +2448,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 
 /* ── Settings sections ───────────────────────────────────────────────────── */
 .settings-section {
-  padding: 16px 0 18px;
+  padding: 14px 0 16px;
   border-bottom: 1px solid var(--border-soft);
 }
 /* No trailing rule and no trailing padding at the foot of a panel — the
@@ -2423,7 +2467,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   margin: 0 0 6px;
 }
 .settings-help {
-  margin: 0 0 11px;
+  margin: 0 0 9px;
   color: var(--fg-3);
   font-size: 12px;
   line-height: 1.55;

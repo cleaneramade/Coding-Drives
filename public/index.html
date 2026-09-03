@@ -132,11 +132,19 @@
   <div class="modal modal-lg" id="modal-settings" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-settings-title">
     <div class="modal-backdrop"></div>
     <div class="modal-card">
+      <!-- Actions live in the header, left of the close button. There is no
+           Cancel: the ✕ and a click on the backdrop both already close without
+           saving, so a third way to do the same thing was just noise — and
+           dropping the footer gives the panel below its height back. -->
       <header class="modal-head">
         <h2 id="modal-settings-title">Settings</h2>
-        <button class="icon-btn modal-close" aria-label="Close" type="button">
-          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
-        </button>
+        <div class="modal-head-aux">
+          <button class="set-head-btn" id="set-reset" type="button" data-armed="false">Reset all</button>
+          <button class="set-head-btn set-head-btn-brand" id="set-save" type="button">Save changes</button>
+          <button class="icon-btn modal-close" aria-label="Close" type="button">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
+          </button>
+        </div>
       </header>
 
       <!-- Tabs. Settings used to be one long scroll where a wide control
@@ -385,12 +393,6 @@
         <div class="modal-error" id="set-error"></div>
       </div>
 
-      <footer class="modal-foot">
-        <button class="btn btn-ghost" id="set-reset" type="button">Reset all to defaults</button>
-        <div class="grow"></div>
-        <button class="btn btn-ghost modal-close" type="button">Cancel</button>
-        <button class="btn btn-brand" id="set-save" type="button">Save changes</button>
-      </footer>
     </div>
   </div>
 

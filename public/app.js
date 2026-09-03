@@ -3548,6 +3548,7 @@ document.querySelector(".settings-tabs")?.addEventListener("click", (e) => {
 });
 
 function closeSettings() {
+  disarmReset();
   settingsModal.classList.remove("is-open");
   settingsModal.style.display = "none";
   settingsState = null;
@@ -4332,8 +4333,31 @@ document.getElementById("set-save").addEventListener("click", async () => {
 });
 
 // Reset everything to bundled defaults.
+// Reset is a two-state button rather than a confirm() dialog. First click arms
+// it — the label changes to say what will happen and it turns red; a second
+// click inside the window does it. Walk away and it disarms itself, so an
+// accidental press costs nothing and never blocks the window the way a modal
+// confirm does.
+const RESET_ARMED_MS = 4000;
+let resetArmTimer = null;
+function disarmReset() {
+  clearTimeout(resetArmTimer);
+  resetArmTimer = null;
+  const btn = document.getElementById("set-reset");
+  if (!btn) return;
+  btn.dataset.armed = "false";
+  btn.textContent = "Reset all";
+}
 document.getElementById("set-reset").addEventListener("click", async () => {
-  if (!confirm("Reset all settings to defaults? Your project statuses and notes are preserved.")) return;
+  const btn = document.getElementById("set-reset");
+  if (btn.dataset.armed !== "true") {
+    btn.dataset.armed = "true";
+    btn.textContent = "Sure? Resets everything";
+    clearTimeout(resetArmTimer);
+    resetArmTimer = setTimeout(disarmReset, RESET_ARMED_MS);
+    return;
+  }
+  disarmReset();
   try {
     await api("/api/settings/reset", { method: "POST", body: {} });
     closeSettings();
