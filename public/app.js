@@ -3548,9 +3548,14 @@ function positionTabInk({ animate = true } = {}) {
   const host = strip.getBoundingClientRect();
   if (!btn.width) return;            // dialog still hidden — nothing to measure
   const border = parseFloat(getComputedStyle(strip).borderLeftWidth) || 0;
+  // Sit 2px inside the button on each side. At full button width the thumb
+  // on the first and last tab ran flush into the strip's rounded edge, which
+  // read as hugging next to the 6px of clearance it has above and below; this
+  // matches the two.
+  const INSET = 2;
   if (!animate) ink.style.transition = "none";
-  ink.style.width = `${Math.round(btn.width)}px`;
-  ink.style.transform = `translateX(${Math.round(btn.left - host.left - border)}px)`;
+  ink.style.width = `${Math.round(btn.width) - INSET * 2}px`;
+  ink.style.transform = `translateX(${Math.round(btn.left - host.left - border) + INSET}px)`;
   if (!animate) { void ink.offsetWidth; ink.style.transition = ""; }
 }
 window.addEventListener("resize", () => positionTabInk({ animate: false }));
