@@ -3552,7 +3552,7 @@ function positionTabInk({ animate = true } = {}) {
   // on the first and last tab ran flush into the strip's rounded edge, which
   // read as hugging next to the 6px of clearance it has above and below; this
   // matches the two.
-  const INSET = 2;
+  const INSET = 1;
   if (!animate) ink.style.transition = "none";
   ink.style.width = `${Math.round(btn.width) - INSET * 2}px`;
   ink.style.transform = `translateX(${Math.round(btn.left - host.left - border) + INSET}px)`;

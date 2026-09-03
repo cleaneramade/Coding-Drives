@@ -1785,9 +1785,13 @@ body:has(.modal.is-open) { overflow: hidden; }
   /* A floating control, not a strip welded to the dialog. The old full-width
      rule under it cut the header off from the body and made the tabs read as
      a fixed piece of chrome; inset and rounded, the group reads as one thing
-     you can move between, and the panel below simply follows it. */
-  margin: 7px 20px 14px;
-  padding: 4px;
+     you can move between, and the panel below simply follows it.
+
+     The clearance is asymmetric on purpose: generous ABOVE, to separate the
+     strip from the header, and tight BELOW, because the panel is what the
+     strip labels and a band of empty space between them just reads as a gap. */
+  margin: 7px 20px 6px;
+  padding: 5px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -1824,7 +1828,7 @@ body:has(.modal.is-open) { overflow: hidden; }
      only the 1px stroke as a gap. Inset past the padding instead: 5px leaves a
      clear 5px of bed above and below, and the thumb lands a touch shorter than
      the button it marks. */
-  top: 5px; bottom: 5px;
+  top: 4px; bottom: 4px;
   width: 0;
   border-radius: 999px;
   background: var(--tile-violet-bg);
@@ -2500,6 +2504,10 @@ body:has(.modal.is-open) { overflow: hidden; }
    dialog footer already provides that gap, and the 20px was pushing Folders
    five pixels past the pinned body height for a scrollbar nobody needs. */
 .settings-section:last-of-type { border-bottom: 0; padding-bottom: 2px; }
+/* The first section needs almost no top padding: the tab strip is right above
+   it and already supplies the separation, so the section's own 12px was
+   stacking on top of that and opening a band of dead space under the tabs. */
+.settings-panel > .settings-section:first-of-type { padding-top: 4px; }
 /* Section label — an eyebrow, not a headline. Uppercase and tracked, so it
    still reads as a heading at a size below the option titles it sits over. */
 .settings-title {
