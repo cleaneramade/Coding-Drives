@@ -160,11 +160,6 @@ body {
   filter: drop-shadow(0 4px 12px rgba(106,77,255,0.15));
 }
 .brand-text { display: flex; flex-direction: column; min-width: 0; }
-.brand-eyebrow {
-  font-size: 11px; letter-spacing: var(--tracking-wide);
-  text-transform: uppercase; color: var(--fg-3);
-  font-weight: 700;
-}
 .brand-title {
   font-family: var(--font-display);
   font-weight: 700;
@@ -2373,10 +2368,10 @@ body:has(.modal.is-open) { overflow: hidden; }
   margin: 0 0 6px;
 }
 .settings-help {
-  margin: 0 0 12px;
+  margin: 0 0 11px;
   color: var(--fg-3);
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.55;
 }
 .settings-help em { font-style: normal; color: var(--warning); font-weight: 600; }
 
@@ -2388,8 +2383,8 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-toggle-row {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 13px 15px;
+  gap: 14px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
@@ -2421,10 +2416,10 @@ body:has(.modal.is-open) { overflow: hidden; }
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
 }
 .settings-toggle-title {
-  font-size: 13.5px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--fg-1);
   line-height: 1.25;
@@ -2435,12 +2430,13 @@ body:has(.modal.is-open) { overflow: hidden; }
    against both lines. */
 .settings-toggle-label .settings-title,
 .settings-toggle-label .settings-help { margin: 0; }
+.settings-toggle-label .settings-help { font-size: 11.5px; line-height: 1.45; }
 .switch {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
-  width: 38px;
-  height: 22px;
+  width: 34px;
+  height: 20px;
 }
 .switch input {
   position: absolute;
@@ -2463,8 +2459,8 @@ body:has(.modal.is-open) { overflow: hidden; }
   position: absolute;
   top: 50%;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   background: var(--fg-2);
   border-radius: 50%;
   transform: translateY(-50%);
@@ -2476,7 +2472,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   border-color: var(--brand-500);
 }
 .switch input:checked + .switch-track .switch-thumb {
-  left: 18px;
+  left: 16px;
   background: #fff;
 }
 .switch input:focus-visible + .switch-track {
