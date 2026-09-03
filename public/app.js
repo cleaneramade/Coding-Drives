@@ -3627,8 +3627,8 @@ function renderTaskModelSelect() {
   sel._cdSync?.();
   const help = document.getElementById("set-model-help");
   if (help) {
-    // Lower case and short: it shares a line with its label, after a dash.
-    help.textContent = agent === "codex" ? "which brain Codex uses" : "which brain Claude Code uses";
+    // Short: it shares a line with its label, after a dash.
+    help.textContent = agent === "codex" ? "Which brain Codex uses" : "Which brain Claude Code uses";
   }
 }
 document.getElementById("set-task-model")?.addEventListener("change", (e) => {
