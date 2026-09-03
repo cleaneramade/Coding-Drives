@@ -1719,7 +1719,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   flex: 0 0 auto;
   /* No footer any more, so the body claims that height: the cap allows for
      the header, the tab strip and the 32px the card keeps off the viewport. */
-  height: min(760px, calc(100vh - 142px));
+  height: min(760px, calc(100vh - 146px));
 }
 
 /* ── Settings header actions ─────────────────────────────────────────────
@@ -1767,11 +1767,12 @@ body:has(.modal.is-open) { overflow: hidden; }
    with five tabs to fit at a single height, and the Cards tab now carries a
    card preview. Scoped so no other modal grows. */
 #modal-settings .modal-card { max-height: calc(100vh - 24px); }
-/* More than the 8/18 a modal body normally gets: with no footer under it, the
-   last row of the fullest tab sat 19px off the card's rounded bottom edge and
-   the first heading was just as tight under the tab strip. Needs the id to
+/* Bottom only. With no footer under it the last row of the fullest tab sat
+   19px off the card's rounded bottom edge, so that end gets 24px. The TOP
+   keeps the shared 8px: the clearance the tab strip needs is its own margin,
+   above it, not a gap between it and the panel it labels. Needs the id to
    outrank .modal-body, which sets the shared padding further down the file. */
-#modal-settings .settings-body { padding: 15px 20px 24px; }
+#modal-settings .settings-body { padding: 8px 20px 24px; }
 
 /* ── Settings tabs ─────────────────────────────────────────────────────────
    A left-to-right strip under the dialog title. Each tab owns the full width
@@ -1798,7 +1799,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   flex: 1 1 0;
   position: relative;
   z-index: 1;
-  padding: 6px 8px;
+  padding: 8px 8px;
   font: inherit; font-size: 12.5px; font-weight: 600;
   letter-spacing: var(--tracking-snug);
   color: var(--fg-3);
@@ -1834,8 +1835,8 @@ body:has(.modal.is-open) { overflow: hidden; }
   /* The slide is the point: long enough to read as travel, on a curve that
      overshoots a hair and settles, so moving between tabs feels like the thumb
      is carried across rather than teleporting. */
-  transition: transform var(--dur-slow) cubic-bezier(0.34, 1.28, 0.64, 1),
-              width var(--dur-slow) cubic-bezier(0.34, 1.28, 0.64, 1);
+  transition: transform var(--dur-slow) var(--ease-in-out),
+              width var(--dur-slow) var(--ease-in-out);
 }
 /* The label colour hands over at the same pace, so the word lights up as the
    thumb arrives instead of before it. */
@@ -2511,7 +2512,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   margin: 0 0 6px;
 }
 .settings-help {
-  margin: 0 0 6px;
+  margin: 0 0 7px;
   color: var(--fg-3);
   font-size: 12px;
   line-height: 1.55;
