@@ -2190,7 +2190,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   background: rgba(255, 255, 255, 0.02);
 }
 .cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-active="true"]:not([data-over="true"]) .cardbtn-slot-num {
-  background: var(--surface-3); color: var(--fg-3);
+  color: var(--fg-4);
 }
 /* The slot index, in its own row above the button rather than a chip stuck on
    the dashed edge — it had been colliding with the pill's corner, and a badge
@@ -2198,17 +2198,12 @@ body:has(.modal.is-open) { overflow: hidden; }
    slots line up as a matched set, and unbordered so it stays quiet until the
    slot is the one being filled. */
 .cardbtn-slot-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 17px; height: 17px; padding: 0 5px;
-  border-radius: 999px;
-  font-size: 9.5px; font-weight: 700; line-height: 1;
-  background: var(--surface-3); color: var(--fg-3);
-  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--fg-4);
+  transition: color var(--dur) var(--ease-out);
 }
 .cardbtn-slot[data-active="true"] .cardbtn-slot-num,
-.cardbtn-slot[data-over="true"] .cardbtn-slot-num {
-  background: var(--brand-500); color: #fff;
-}
+.cardbtn-slot[data-over="true"] .cardbtn-slot-num { color: var(--tile-violet-fg); }
 /* Inside a slot the pill IS the card's action button, so it takes that
    button's exact metrics: .btn's radius, .card-actions .btn's padding, and the
    12px label .card-actions .vendor-label sets. */

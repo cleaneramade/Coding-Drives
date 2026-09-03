@@ -184,35 +184,32 @@
             </div>
           </section>
 
-          <!-- Card-buttons builder — drag and drop, tools first. The pill
-               shelf on top lists every choice a button can be, with Claude and
-               Codex appearing twice (app and terminal) so nothing is hidden
-               behind a toggle. The three dashed slots below are the action
-               buttons on every card. Drag a pill into a slot, or drag one
-               slot's pill onto another to swap them; tap-to-place is kept as a
-               fallback. Rendered by renderCardButtonsEditor() in app.js —
-               both containers are filled from script. -->
+          <!-- Card-buttons builder — drag and drop. The shelf lists every
+               choice a button can be, with Claude and Codex appearing twice
+               (app and terminal) so nothing is hidden behind a toggle. Drag a
+               pill into a slot on the preview card, or drag one slot's pill
+               onto another to swap them; tap-to-place is kept as a fallback.
+               Rendered by renderCardButtonsEditor() in app.js — the preview,
+               the slots and the shelf are all filled from script. -->
           <section class="settings-section">
             <h3 class="settings-title">Card buttons</h3>
             <p class="settings-help">Every card has three buttons. Drag a tool onto one, or tap a button then tap a tool.</p>
-            <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
-            <!-- Live preview of a project card. Demo data, but the three
-                 action buttons at the foot of it ARE the drop slots, sitting
-                 exactly where they will sit on a real card. The badge rows
-                 mirror the two switches in the section above, so toggling one
-                 shows you the result rather than describing it. -->
-            <p class="cardbtn-slots-cap">Your three buttons</p>
-            <!-- 1:1 preview. This is the project-card markup with the project-
-                 card classes, so it renders at exactly the scale, spacing and
-                 styling of a card in the grid — change the card and the
-                 preview follows for free. Contents are demo data; the only
-                 real difference is the action row, whose three buttons are the
-                 dashed drop slots. Icon buttons and status pills are spans,
-                 not buttons: nothing in here is clickable except the slots. -->
+            <!-- Reading order is deliberate: the preview sits in the
+                 middle, the two badge switches are in the section above it and
+                 the tool shelf is directly below it. The slots are the
+                 preview's LAST row, so the shelf you drag from ends up right
+                 next to the slots you drag onto — the shortest possible drag,
+                 and both halves stay on screen together.
+
+                 The card itself is the real project-card markup with the real
+                 card classes, so it is 1:1 with a card in the grid by
+                 construction. Its contents are filled from a real project in
+                 renderCardPreview() (app.js) — this app's own, when the scan
+                 has found it. -->
             <article class="card cardbtn-preview" aria-label="Preview of a project card">
               <header class="card-head">
                 <div class="card-title-row">
-                  <h2 class="card-title">Untitled</h2>
+                  <h2 class="card-title"></h2>
                   <div class="card-title-actions" aria-hidden="true">
                     <span class="icon-btn">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 7 2 2 4-4"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>
@@ -225,43 +222,35 @@
                     </span>
                   </div>
                 </div>
-                <div class="card-meta" id="set-preview-tech">
-                  <span class="stack-badge" data-stack="Next.js">Next.js</span>
-                  <span class="indicators">
-                    <span class="ind" data-kind="git">Git</span>
-                    <span class="ind" data-kind="vercel">Vercel</span>
-                  </span>
+                <div class="card-meta">
+                  <span class="cardbtn-preview-stack"></span>
+                  <span class="indicators"></span>
                 </div>
               </header>
 
               <div class="card-row">
                 <span class="label">Status</span>
-                <div class="status-picker">
-                  <span class="status-pill" aria-selected="true" data-color="warning">In Progress</span>
-                  <span class="status-pill">On Hold</span>
-                  <span class="status-pill">Done</span>
-                </div>
+                <div class="status-picker"></div>
               </div>
 
               <div class="card-path-row">
                 <div class="card-path">
-                  <span class="card-path-text">C:\Projects\Untitled</span>
+                  <span class="card-path-text"></span>
                   <span class="card-path-copy" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
                   </span>
                 </div>
               </div>
 
-              <div class="card-row card-row-langs" id="set-preview-langs">
-                <div class="languages">
-                  <span class="lang-badge" style="background: rgba(49,120,198,0.15); border-color: rgba(49,120,198,0.55); color: #3178c6;"><span class="lang-badge-name">TypeScript</span><span class="lang-badge-pct">62%</span></span>
-                  <span class="lang-badge" style="background: rgba(86,61,124,0.15); border-color: rgba(86,61,124,0.55); color: #a78bfa;"><span class="lang-badge-name">CSS</span><span class="lang-badge-pct">24%</span></span>
-                  <span class="lang-badge" style="background: rgba(227,79,38,0.15); border-color: rgba(227,79,38,0.55); color: #e34f26;"><span class="lang-badge-name">HTML</span><span class="lang-badge-pct">14%</span></span>
-                </div>
+              <div class="card-row card-row-langs">
+                <div class="languages"></div>
               </div>
 
               <footer class="card-actions cardbtn-slots" id="set-cardbtn-slots"></footer>
             </article>
+
+            <p class="cardbtn-slots-cap">Tools</p>
+            <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
           </section>
         </div>
 

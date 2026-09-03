@@ -3566,13 +3566,13 @@ settingsModal.querySelectorAll(".modal-close, .modal-backdrop").forEach((el) =>
 document.getElementById("set-show-stack")?.addEventListener("change", (e) => {
   if (!settingsState) return;
   settingsState.showStackBadge = e.target.checked;
-  renderCardPreviewBadges();
+  renderCardPreview();
 });
 // Language-badge toggle — same pattern as the stack badge above.
 document.getElementById("set-show-langs")?.addEventListener("change", (e) => {
   if (!settingsState) return;
   settingsState.showLanguageBadges = e.target.checked;
-  renderCardPreviewBadges();
+  renderCardPreview();
 });
 // Headless background terminals — task/publish sessions run hidden and exit
 // when done (handled server-side in spawnAiPrompt's headless branch).
@@ -3752,22 +3752,89 @@ function cardBtnPill(id) {
   return pill;
 }
 
-// The preview card's badge rows mirror the two switches in the section above
-// it. Same surface, same moment — flip "Language badges" off and the coloured
-// chips leave the preview, which is a better answer than the sentence under
-// the switch.
-function renderCardPreviewBadges() {
-  const tech = document.getElementById("set-preview-tech");
-  const langs = document.getElementById("set-preview-langs");
-  if (!tech || !langs || !settingsState) return;
-  // The rows live on real .card-meta / .card-row elements now, so hide the
-  // whole row the way a card does rather than an inner wrapper.
-  tech.hidden = !settingsState.showStackBadge;
-  langs.hidden = !settingsState.showLanguageBadges;
+// The preview card is filled with a REAL project, not invented data — this
+// app's own project when it can be found in the scan, otherwise whichever
+// project sorts first. Seeing your own stack, your own languages and your own
+// path is a far better answer to "what am I changing" than a fake "Untitled"
+// with plausible-looking chips, and it means the preview is wrong the moment
+// the card rendering is wrong.
+//
+// Tasks are deliberately left out: the preview is about the badge rows and the
+// action buttons, and a task list would double its height for nothing.
+function previewProject() {
+  if (!Array.isArray(projects) || projects.length === 0) return null;
+  const mine = projects.find((p) => /coding\s*drives/i.test(p.name || ""));
+  return mine || projects[0];
+}
+
+// Paint the preview from that project. Called whenever the editor re-renders
+// and whenever one of the two badge switches is flipped, so the preview always
+// shows the settings as they stand right now — including unsaved ones.
+function renderCardPreview() {
+  const card = document.querySelector(".cardbtn-preview");
+  if (!card || !settingsState) return;
+  const p = previewProject();
+
+  const titleEl = card.querySelector(".card-title");
+  const metaRow = card.querySelector(".card-meta");
+  const stackHost = card.querySelector(".cardbtn-preview-stack");
+  const indHost = card.querySelector(".indicators");
+  const langRow = card.querySelector(".card-row-langs");
+  const langHost = card.querySelector(".languages");
+  const pathEl = card.querySelector(".card-path-text");
+  const picker = card.querySelector(".status-picker");
+
+  titleEl.textContent = p ? p.name : "No projects yet";
+  pathEl.textContent = p ? p.path : "Add a scan folder to see a real project here";
+
+  // Tech row — the stack badge (plus a second one for polyglot projects, same
+  // as a card) and the GIT / VERCEL / ENV markers.
+  metaRow.hidden = !settingsState.showStackBadge;
+  stackHost.textContent = "";
+  indHost.textContent = "";
+  if (p && settingsState.showStackBadge) {
+    for (const name of [p.stack, Array.isArray(p.stacks) ? p.stacks[1] : null].filter(Boolean)) {
+      const b = document.createElement("span");
+      b.className = "stack-badge";
+      b.textContent = name;
+      b.dataset.stack = name;
+      stackHost.appendChild(b);
+    }
+    for (const kind of ["git", "vercel", "env"]) {
+      if (!p.indicators?.[kind]) continue;
+      const span = document.createElement("span");
+      span.className = "ind";
+      span.dataset.kind = kind;
+      span.textContent = kind;
+      indHost.appendChild(span);
+    }
+  }
+
+  // Status row — every status, the project's own one selected, exactly as a
+  // card paints it.
+  picker.textContent = "";
+  for (const s of statuses) {
+    const pill = document.createElement("span");
+    pill.className = "status-pill";
+    pill.textContent = s.label;
+    const on = !!p && p.status === s.id;
+    pill.setAttribute("aria-selected", String(on));
+    applyStatusColor(pill, s.color, on);
+    picker.appendChild(pill);
+  }
+
+  // Language row — the project's real breakdown, through the same badge
+  // builder the cards use, so the colours and percentages match.
+  const langs = Array.isArray(p?.languages) ? p.languages : [];
+  langRow.hidden = !settingsState.showLanguageBadges || langs.length === 0;
+  langHost.textContent = "";
+  for (const l of langs.slice(0, LANG_BADGE_MAX)) {
+    langHost.appendChild(makeLangBadge(l.name, l.pct, l.color || LANG_OTHER_COLOR, ""));
+  }
 }
 
 function renderCardButtonsEditor() {
-  renderCardPreviewBadges();
+  renderCardPreview();
   const slotsHost = document.getElementById("set-cardbtn-slots");
   const shelf = document.getElementById("set-cardbtn-grid");
   if (!slotsHost || !shelf || !settingsState) return;
@@ -3837,12 +3904,11 @@ function renderCardButtonsEditor() {
     el.tabIndex = 0;
     el.setAttribute("aria-label", `Button ${i + 1}: ${label}. Drop a tool here, or tap to choose one.`);
 
-    // Small corner index rather than a "Button 1" caption: a real card has no
-    // label above its action row, and the digit still ties the slot to the
-    // badge the shelf puts on whichever tool is sitting in it.
+    // Names the slot, and ties it to the number the shelf badges onto
+    // whichever tool is sitting in it.
     const num = document.createElement("span");
     num.className = "cardbtn-slot-num";
-    num.textContent = String(i + 1);
+    num.textContent = `Button ${i + 1}`;
     num.setAttribute("aria-hidden", "true");
 
     const pill = cardBtnPill(id);
