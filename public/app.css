@@ -2291,11 +2291,13 @@ body:has(.modal.is-open) { overflow: hidden; }
    spilled onto the slots either side of it, so two looked lit at once. The
    edge stays dashed throughout: it is still a place something goes.
 
-   Armed slot: 1px violet dash. Live drop target: 2px, which reads as more
-   without adding a second colour — box-sizing is border-box everywhere, so
-   the extra pixel costs no layout shift. */
-.cardbtn-slot[data-active="true"] { border-color: var(--brand-500); }
-.cardbtn-slot[data-over="true"] { border-color: var(--brand-500); border-width: 2px; }
+   Only the COLOUR changes, never the weight. A 2px drop target redrew the dash
+   at a different scale, so the dashes visibly grew and their rhythm shifted the
+   moment a slot lit up — the line stopped looking like the same line. It buys
+   nothing either: mid-drag every other slot has stood down to grey, so the
+   target is already the only violet edge on the board. */
+.cardbtn-slot[data-active="true"],
+.cardbtn-slot[data-over="true"] { border-color: var(--brand-500); }
 .cardbtn-slot:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: 2px; }
 /* Mid-drag every slot stands down, armed one included, so the only violet
    edge on the board is the one under the pointer. */
