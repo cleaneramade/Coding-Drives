@@ -214,6 +214,23 @@ const STATUS_SWATCH_CSS = {
   muted:    "var(--fg-3)",
   archived: "#a1a1aa",   // matches the archived pill rule in app.css
 };
+// What the colour picker calls each token. The token names are design-system
+// internals — "brand", "muted", "archived" tell a reader nothing about what
+// they will see, so the dropdown shows the colour instead.
+const STATUS_COLOR_LABELS = {
+  brand:    "Violet",
+  success:  "Green",
+  warning:  "Yellow",
+  danger:   "Red",
+  info:     "Blue",
+  muted:    "Grey",
+  archived: "Faded grey",
+};
+function statusColorLabel(color) {
+  // A legacy hex has no name worth printing, and the swatch beside the picker
+  // already shows exactly which colour it is.
+  return STATUS_COLOR_LABELS[color] || "Custom colour";
+}
 function statusSwatchColor(color) {
   if (isHex(color)) return color;
   return STATUS_SWATCH_CSS[color] || "var(--fg-3)";
@@ -3920,6 +3937,7 @@ function renderSettings() {
     label.type = "text";
     label.value = s.label;
     label.setAttribute("aria-label", "Status name");
+    label.placeholder = "Name this status";
     // Mutate in place without re-rendering — a re-render here would yank focus
     // out of the field on every keystroke.
     label.addEventListener("input", () => {
@@ -3935,7 +3953,7 @@ function renderSettings() {
     for (const t of opts) {
       const o = document.createElement("option");
       o.value = t;
-      o.textContent = t;
+      o.textContent = statusColorLabel(t);
       if (t === s.color) o.selected = true;
       sel.appendChild(o);
     }

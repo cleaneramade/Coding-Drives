@@ -2524,8 +2524,13 @@ body:has(.modal.is-open) { overflow: hidden; }
   outline: none;
   transition: border-color var(--dur) var(--ease-out);
 }
-.status-edit-row input { flex: 1; min-width: 0; }
+.status-edit-row input { flex: 1 1 auto; min-width: 0; }
 .status-edit-row select { flex: none; cursor: pointer; }
+/* The colour picker is the branded .cdsel wrapper, not a bare <select>, and
+   .cdsel is width:100% by default — which ate the whole row and squeezed the
+   name field down to 18px, so every status looked nameless. Pin it and let the
+   name take the space it needs. */
+.status-edit-row > .cdsel { flex: 0 0 auto; width: 150px; }
 .status-edit-row input:focus,
 .status-edit-row select:focus { border-color: rgba(255,255,255,0.18); }
 /* Previews the color the chip will actually use, so the row reads as the thing
