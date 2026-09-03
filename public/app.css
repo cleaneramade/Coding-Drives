@@ -2545,6 +2545,11 @@ body:has(.modal.is-open) { overflow: hidden; }
   align-items: center;
   gap: 14px;
   padding: 12px 14px;
+  /* Every option is the same height whatever control sits on its right. A
+     switch is 20px, the segmented picker and the dropdown are taller, and left
+     to themselves they made three different row heights in one list. The row
+     sets the height; the controls are sized to fit inside it. */
+  min-height: 52px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
@@ -2558,6 +2563,9 @@ body:has(.modal.is-open) { overflow: hidden; }
 .settings-toggle-row > .settings-toggle-label { flex: 1 1 auto; min-width: 0; }
 .settings-toggle-row > .cdsel,
 .settings-toggle-row > .cd-select { flex: 0 0 auto; width: 210px; }
+/* Compact spins of the two taller controls, so they clear the 52px row. */
+.settings-toggle-row .cdsel-btn { padding: 5px 11px; font-size: 12.5px; }
+.settings-toggle-row .gh-vis-opt { padding: 3px 14px; font-size: 12px; }
 /* …except in a stacked row, where the control sits under the label and should
    span the panel. */
 .settings-row-stack > .cdsel,
