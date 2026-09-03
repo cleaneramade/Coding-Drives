@@ -222,6 +222,25 @@ function statusColorLabel(color) {
   // already shows exactly which colour it is.
   return STATUS_COLOR_LABELS[color] || "Custom colour";
 }
+// What each token looks like as a single dot, for the swatches in the colour
+// picker's list. A name alone ("Faded grey", "Yellow") is a word you have to
+// take on trust; beside its dot it is a choice you can see before you make it.
+const STATUS_SWATCH_CSS = {
+  brand:    "var(--brand-500)",
+  success:  "var(--success)",
+  warning:  "var(--warning)",
+  danger:   "var(--danger)",
+  info:     "var(--info)",
+  // "Grey" and "Faded grey" have to be two visibly different dots or the
+  // picker offers the same swatch twice — so they take the bright and the dim
+  // end of the grey ramp, which is how the two pills read on a card anyway.
+  muted:    "var(--fg-2)",
+  archived: "var(--fg-4)",
+};
+function statusSwatchColor(color) {
+  if (isHex(color)) return color;
+  return STATUS_SWATCH_CSS[color] || "var(--fg-3)";
+}
 
 // projects.json stores status ids, so an id is generated once at creation and
 // never changes — renaming a status only touches its label. Rewriting an id
@@ -4053,11 +4072,16 @@ function renderSettings() {
   // Statuses
   const stHost = document.getElementById("set-status-list");
   stHost.innerHTML = "";
-  // Each row IS the chip it configures: the name field is styled as the status
-  // pill in its own colour, so what you type is what a card will show. It used
-  // to be three nested boxes — a bordered row wrapping a bordered input and a
-  // bordered dropdown — with a disconnected dot off to the side telling you
-  // the colour that the dropdown beside it already named.
+  // One strip per status, laid out like every other option row in Settings:
+  // the thing on the left, the control on the right. The thing on the left is
+  // the status pill itself — the name field is styled and coloured as the pill
+  // a card will show — so the row is a picture of its own result.
+  // How many projects sit in each status right now, so a row can say what a
+  // delete would actually move.
+  const stCounts = projects.reduce((acc, p) => {
+    acc[p.status] = (acc[p.status] || 0) + 1;
+    return acc;
+  }, {});
   settingsState.statuses.forEach((s, i) => {
     const row = document.createElement("div");
     row.className = "status-edit-row";
@@ -4076,6 +4100,11 @@ function renderSettings() {
       del.setAttribute("aria-label", `Remove ${label.value || "status"}`);
     });
 
+    const count = document.createElement("span");
+    count.className = "status-edit-count";
+    const n = stCounts[s.id] || 0;
+    count.textContent = n === 0 ? "No projects" : `${n} project${n === 1 ? "" : "s"}`;
+
     const sel = document.createElement("select");
     sel.setAttribute("aria-label", "Status colour");
     // A legacy hex from the old customisation screen has no matching token.
@@ -4086,6 +4115,9 @@ function renderSettings() {
       const o = document.createElement("option");
       o.value = t;
       o.textContent = statusColorLabel(t);
+      // Paints a swatch beside the name in the branded dropdown, so the list
+      // is a row of colours rather than a list of colour words.
+      o.dataset.dot = statusSwatchColor(t);
       if (t === s.color) o.selected = true;
       sel.appendChild(o);
     }
@@ -4107,7 +4139,7 @@ function renderSettings() {
       renderSettings();
     });
 
-    row.append(label, sel, del);
+    row.append(label, count, sel, del);
     stHost.appendChild(row);
   });
 
@@ -4907,11 +4939,16 @@ function upgradeSelect(sel) {
   btn.setAttribute("aria-expanded", "false");
   const label = document.createElement("span");
   label.className = "cdsel-label";
+  // Only shows for options that carry data-dot (the status colour picker).
+  const btnDot = document.createElement("span");
+  btnDot.className = "cdsel-dot";
+  btnDot.setAttribute("aria-hidden", "true");
+  btnDot.hidden = true;
   const caret = document.createElement("span");
   caret.className = "cdsel-caret";
   caret.setAttribute("aria-hidden", "true");
   caret.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
-  btn.append(label, caret);
+  btn.append(btnDot, label, caret);
 
   const pop = document.createElement("div");
   pop.className = "cdsel-pop";
@@ -4940,6 +4977,9 @@ function upgradeSelect(sel) {
     const opt = sel.options[sel.selectedIndex];
     label.textContent = opt ? opt.textContent : "";
     label.dataset.placeholder = opt && opt.value === "" ? "true" : "false";
+    const dot = opt?.dataset.dot || "";
+    btnDot.hidden = !dot;
+    if (dot) btnDot.style.background = dot;
   };
 
   const buildRows = () => {
@@ -4950,7 +4990,17 @@ function upgradeSelect(sel) {
       row.className = "cdsel-opt";
       row.setAttribute("role", "option");
       row.dataset.index = String(i);
-      row.textContent = opt.textContent;
+      if (opt.dataset.dot) {
+        row.classList.add("has-dot");
+        const d = document.createElement("span");
+        d.className = "cdsel-dot";
+        d.style.background = opt.dataset.dot;
+        const t = document.createElement("span");
+        t.textContent = opt.textContent;
+        row.append(d, t);
+      } else {
+        row.textContent = opt.textContent;
+      }
       row.setAttribute("aria-selected", String(i === sel.selectedIndex));
       if (opt.disabled) row.disabled = true;
       row.addEventListener("click", () => {

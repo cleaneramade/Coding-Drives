@@ -2703,29 +2703,42 @@ body:has(.modal.is-open) { overflow: hidden; }
   color: var(--fg-2);
 }
 
-/* Status editor — one row per status (swatch, name, color, remove). These stack
-   vertically rather than wrapping like the path/exclude pills above: each row
-   carries three controls and needs the full width to stay legible. */
+/* Status editor — one row per status. The row is the same object every other
+   option in Settings is: one soft-bordered strip, one height, the same hover.
+   Without it the tab was loose parts on a bare panel — a chip on the left, a
+   dropdown pinned to the right and a stretch of nothing between them — so four
+   statuses read as eight fragments rather than one list of four. The strip
+   holds each set together; inside it the chip is still the thing it configures. */
 .status-edit-list {
-  display: flex; flex-direction: column; gap: 6px;
-  margin-bottom: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 12px;
 }
-/* One line per status, and no box around it. The chip carries the colour and
-   the shape a card will actually show, the dropdown names that colour, and the
-   ✕ removes it — three things on a row instead of three nested borders. */
 .status-edit-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px 8px 12px;
+  /* The same 52px as .settings-toggle-row, so a status sits at the height of
+     an option on any other tab and the tabs share one rhythm. */
+  min-height: 52px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
-/* The chip: a status pill you can type in. Colour comes from applyStatusColor,
-   the same call the real pills use — inline styles for a legacy hex, a
-   data-color for a token, matched below. */
+.status-edit-row:hover { background: rgba(255, 255, 255, 0.035); border-color: var(--border); }
+/* Editing lights the whole row, not just the field inside it — the row is the
+   unit you are working on. */
+.status-edit-row:focus-within,
+.status-edit-row:has(.cdsel.is-open) { background: rgba(255, 255, 255, 0.035); border-color: var(--ring); }
+
+/* The chip: a status pill you can type in. Its colour comes from
+   applyStatusColor — the same call the real pills use — so what you type here
+   is what a card will show. It sizes to its text like the pill it pictures;
+   the min-width only has to keep a freshly added, empty status clickable. */
 .status-chip-input {
-  /* Sizes to its text, like the pill it is a picture of — stretched to fill
-     the row it read as a coloured bar, not a chip. field-sizing does this
-     natively; the min-width keeps a freshly added, empty status clickable. */
   field-sizing: content;
   flex: 0 1 auto;
-  min-width: 64px;
+  width: auto;
+  min-width: 72px;
   max-width: 100%;
   font: inherit;
   font-weight: 600;
@@ -2737,6 +2750,7 @@ body:has(.modal.is-open) { overflow: hidden; }
   border: 1px solid var(--border);
   color: var(--fg-2);
   outline: none;
+  cursor: text;
   transition: box-shadow var(--dur) var(--ease-out);
 }
 .status-chip-input::placeholder { color: var(--fg-4); font-weight: 500; }
@@ -2750,29 +2764,48 @@ body:has(.modal.is-open) { overflow: hidden; }
 .status-chip-input[data-color="info"]     { background: var(--info-soft);    border-color: var(--info);    color: var(--info); }
 .status-chip-input[data-color="muted"]    { background: var(--surface-3);    border-color: var(--ring);    color: var(--fg-2); }
 .status-chip-input[data-color="archived"] { background: #2a2a30; border-color: rgba(255,255,255,0.12); color: #a1a1aa; }
-/* The colour picker sizes to its longest name and no further. */
-/* Pushed to the right so the colour picker and ✕ line up down the column,
-   however wide the chip beside them happens to be. */
-.status-edit-row > .cdsel { flex: 0 0 auto; width: 138px; margin-left: auto; }
-.status-edit-row .cdsel-btn { padding: 7px 11px; font-size: 12px; }
-.status-edit-list { display: flex; flex-direction: column; gap: 8px; }
-/* The add field sizes to the job — a status name is a couple of words, and a
-   full-bleed slab under a column of small chips read as the loudest thing on
-   the tab. Folders keeps its wide field: a path needs the room. */
-.settings-panel[data-panel="statuses"] .modal-input-row input { flex: 0 1 320px; }
+
+/* The middle of the row was doing nothing, and the one fact worth knowing
+   about a status is how many projects are sitting in it — which is exactly
+   what the help line above is talking about when it says a delete moves them.
+   Right-aligned, so the counts read as a column against the pickers. */
+.status-edit-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  padding-right: 2px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--fg-4);
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+/* Colour picker and ✕ sit at the row's right edge, so they line up down the
+   column however wide the chip beside them happens to be. */
+.status-edit-row > .cdsel { flex: 0 0 auto; width: 168px; }
+.status-edit-row .cdsel-btn { padding: 6px 11px; font-size: 12.5px; }
 .status-edit-row .remove {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px;
+  width: 26px; height: 26px;
   padding: 0; background: transparent; border: 0;
-  color: var(--fg-3); cursor: pointer;
+  color: var(--fg-4); cursor: pointer;
   border-radius: 50%;
   flex: none;
+  transition: color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
 }
 .status-edit-row .remove:hover { color: var(--danger); background: rgba(248,113,113,0.10); }
 /* Disabled on the last remaining status — an empty list would leave the filter
    row with no chips and no way to add one back. */
 .status-edit-row .remove:disabled { opacity: 0.3; cursor: not-allowed; }
-.status-edit-row .remove:disabled:hover { color: var(--fg-3); background: transparent; }
+.status-edit-row .remove:disabled:hover { color: var(--fg-4); background: transparent; }
+/* The add field spans the list, so it reads as the next row rather than a
+   stray box parked under one — and it takes the sans face. .modal-input-row is
+   mono because Folders, the other tab using it, holds paths; a status name is
+   two words of English. */
+.settings-panel[data-panel="statuses"] .modal-input-row input {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+}
 /* Path text — truncate with an ellipsis (full path on hover via title) so a
    long path becomes a tidy pill instead of stretching the whole row. */
 .path-item > span:first-child {
@@ -3025,6 +3058,23 @@ body:has(.modal.is-open) { overflow: hidden; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .cdsel-label[data-placeholder="true"] { color: var(--fg-4); }
+/* A dropdown that picks a COLOUR should show the colours. Any <option> can
+   carry data-dot="<css colour>" and the button and its list paint a swatch
+   beside the name — used by Settings → Statuses, where "Faded grey" and
+   "Yellow" were words you had to take on trust. Options without the attribute
+   are unchanged, so every other dropdown in the app is untouched. */
+.cdsel-dot {
+  flex: none;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.20);
+}
+.cdsel-dot[hidden] { display: none; }
+.cdsel-opt.has-dot { display: flex; align-items: center; gap: 9px; }
+.cdsel-opt.has-dot > span:last-child {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .cdsel-caret { flex: none; display: inline-flex; color: var(--fg-3); transition: transform var(--dur) var(--ease-out); }
 .cdsel.is-open .cdsel-caret { transform: rotate(180deg); }
 
