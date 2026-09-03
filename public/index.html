@@ -185,19 +185,20 @@
             </div>
           </section>
 
-          <!-- Card-buttons builder — drag and drop. Three dashed slots mirror
-               the three action buttons on every card; the pill grid below is
-               the tool shelf. Drag a pill into a slot, or drag one slot's pill
-               onto another to swap them. Tap-to-place is kept as a fallback:
-               tap a slot to arm it, then tap a pill. Claude/Codex slots carry
-               an App|CLI mini-switch. Rendered by renderCardButtonsEditor()
-               in app.js — both containers are filled from script. -->
+          <!-- Card-buttons builder — drag and drop, tools first. The pill
+               shelf on top lists every choice a button can be, with Claude and
+               Codex appearing twice (app and terminal) so nothing is hidden
+               behind a toggle. The three dashed slots below are the action
+               buttons on every card. Drag a pill into a slot, or drag one
+               slot's pill onto another to swap them; tap-to-place is kept as a
+               fallback. Rendered by renderCardButtonsEditor() in app.js —
+               both containers are filled from script. -->
           <section class="settings-section">
             <h3 class="settings-title">Card buttons</h3>
-            <p class="settings-help">Drag a tool into a slot. Or tap a slot, then tap a tool. Claude and Codex can open as an app or a terminal.</p>
-            <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
-            <p class="cardbtn-shelf-cap">Tools</p>
+            <p class="settings-help">Every tool, with Claude and Codex as an app or a terminal. Drag one onto a button below — or tap a button, then tap a tool.</p>
             <div class="cardbtn-grid" id="set-cardbtn-grid"></div>
+            <p class="cardbtn-slots-cap">The three buttons on every card</p>
+            <div class="cardbtn-slots" id="set-cardbtn-slots"></div>
           </section>
         </div>
 
