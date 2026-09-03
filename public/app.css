@@ -2240,7 +2240,15 @@ body:has(.modal.is-open) { overflow: hidden; }
   font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--fg-4);
 }
-.cardbtn-preview { cursor: default; }
+/* Rendered a shade smaller than a real card, but scaled — not squashed. zoom
+   shrinks type, padding, radii and strokes together, so every proportion the
+   card has is kept; the 92% width is what stops it from being the only thing
+   that doesn't scale (a block's auto width resolves against the parent in the
+   zoomed space, so it would otherwise stay full-bleed and only the height
+   would shrink). Needs to outrank .settings-panel .settings-section > *,
+   which forces width:100% on everything in a section. */
+.cardbtn-preview { cursor: default; zoom: 0.92; }
+.settings-panel .settings-section > .cardbtn-preview { width: 92%; margin-inline: auto; }
 .cardbtn-preview:hover { transform: translateZ(0); border-color: var(--border); }
 .cardbtn-preview .icon-btn,
 .cardbtn-preview .status-pill,
