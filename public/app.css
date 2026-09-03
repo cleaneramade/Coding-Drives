@@ -2118,10 +2118,7 @@ body:has(.modal.is-open) { overflow: hidden; }
 /* Placed in the armed slot: brand hairline, nothing more. The armed slot is
    already violet — a second violet fill up here would make the eye read the
    same highlight twice. */
-.cardbtn-shelf-pill[data-state="here"] {
-  border-color: var(--brand-500);
-  background: var(--surface-3);
-}
+.cardbtn-shelf-pill[data-state="here"] { border-color: var(--brand-500); }
 .cardbtn-shelf-pill[data-state="here"] .cardbtn-pill-badge {
   background: var(--brand-500); color: #fff; border-color: var(--brand-500);
 }
@@ -2172,31 +2169,22 @@ body:has(.modal.is-open) { overflow: hidden; }
               box-shadow var(--dur) var(--ease-out);
 }
 .cardbtn-slot:hover { border-color: rgba(255, 255, 255, 0.30); }
-/* Armed slot — the target for a tap on a shelf pill. */
-.cardbtn-slot[data-active="true"] {
-  border-color: var(--brand-500);
-  background: var(--tile-violet-bg);
-}
-/* Live drop target. Solid brand edge + halo, so mid-drag there is never a
-   question about where the pill will land. */
-.cardbtn-slot[data-over="true"] {
-  border-style: solid;
-  border-color: var(--brand-500);
-  background: var(--tile-violet-bg);
-  box-shadow: 0 0 0 3px rgba(106, 77, 255, 0.22);
-}
+/* State is carried by the dashed edge and the caption, and by nothing else —
+   no fill, no halo. A violet wash inside a slot competed with the button
+   sitting in it (the thing you are actually looking at), and the outer glow
+   spilled onto the slots either side of it, so two looked lit at once. The
+   edge stays dashed throughout: it is still a place something goes.
+
+   Armed slot: 1px violet dash. Live drop target: 2px, which reads as more
+   without adding a second colour — box-sizing is border-box everywhere, so
+   the extra pixel costs no layout shift. */
+.cardbtn-slot[data-active="true"] { border-color: var(--brand-500); }
+.cardbtn-slot[data-over="true"] { border-color: var(--brand-500); border-width: 2px; }
 .cardbtn-slot:focus-visible { outline: 2px solid var(--ring-brand); outline-offset: 2px; }
-/* While a drag is in flight the slots brighten their dashes, so all three
-   read as "droppable" at a glance... */
-.cardbtn-slots[data-dragging="true"] .cardbtn-slot { border-color: var(--ring-brand); }
-/* ...and the armed slot drops its violet fill for the duration, so mid-drag
-   exactly one slot is filled: the one under the pointer. */
-.cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-active="true"]:not([data-over="true"]) {
-  background: rgba(255, 255, 255, 0.02);
-}
-.cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-active="true"]:not([data-over="true"]) .cardbtn-slot-num {
-  color: var(--fg-4);
-}
+/* Mid-drag every slot stands down, armed one included, so the only violet
+   edge on the board is the one under the pointer. */
+.cardbtn-slots[data-dragging="true"] .cardbtn-slot { border-color: var(--ring); }
+.cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-over="true"] { border-color: var(--brand-500); }
 /* The slot index, in its own row above the button rather than a chip stuck on
    the dashed edge — it had been colliding with the pill's corner, and a badge
    half-outside its own box always reads like a sticker. Centred, so the three
@@ -2209,6 +2197,8 @@ body:has(.modal.is-open) { overflow: hidden; }
 }
 .cardbtn-slot[data-active="true"] .cardbtn-slot-num,
 .cardbtn-slot[data-over="true"] .cardbtn-slot-num { color: var(--tile-violet-fg); }
+.cardbtn-slots[data-dragging="true"] .cardbtn-slot .cardbtn-slot-num { color: var(--fg-4); }
+.cardbtn-slots[data-dragging="true"] .cardbtn-slot[data-over="true"] .cardbtn-slot-num { color: var(--tile-violet-fg); }
 /* Inside a slot the pill IS the card's action button, so it takes that
    button's exact metrics: .btn's radius, .card-actions .btn's padding, and the
    12px label .card-actions .vendor-label sets. */
