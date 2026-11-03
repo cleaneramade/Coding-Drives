@@ -23,3 +23,9 @@ UsersWeedwAppDataLocalTempcdfliptest/
 !.env.example
 *.pem
 *.key
+
+# personal setup - never public
+.claude/
+PLUTUS.md
+CLAUDE.md
+scripts/mirror.sh
